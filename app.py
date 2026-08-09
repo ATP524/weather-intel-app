@@ -29,6 +29,7 @@ import os
 
 import requests
 from flask import Flask, jsonify, render_template, request
+from psycopg2.extras import execute_values
 
 import lakebase
 from weather_client import (
@@ -68,6 +69,11 @@ DEFAULT_LOCATIONS = [
 EMBEDDING_MODEL_NAME = os.environ.get(
     "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
 )
+
+# Sliding-window chunking for embedding — identical to the notebook
+# (notebooks/ingest_weather_embeddings.py) so both write paths stay consistent.
+CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "800"))
+CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "100"))
 
 # top_k guardrails: clamp caller-supplied values into a sane range so a typo
 # like top_k=100000 can't ask Postgres to materialize the whole table.
@@ -176,7 +182,10 @@ def sync_weather():
     - limit: max documents to write PER LOCATION (protects against a state with
       dozens of active alerts flooding the table in one call).
 
-    Returns: {"synced": N, "locations": [...], "skipped": [...]}
+    Then vectorizes the freshly-synced docs inline so each city is searchable
+    immediately (near-real-time), instead of waiting on a separate batch run.
+
+    Returns: {"synced": N, "embedded": D, "chunks": C, "locations": [...], "skipped": [...]}
     """
     ensure_weather_tables()
     client = WeatherClient()
@@ -188,6 +197,7 @@ def sync_weather():
     total = 0
     synced_locations = []
     skipped = []
+    embedded = []  # documents to vectorize after upsert
 
     for location in locations:
         # Resolve the location up front; a bad entry shouldn't abort the whole
@@ -214,10 +224,24 @@ def sync_weather():
             client.get_forecast(grid["office"], grid["grid_x"], grid["grid_y"], label)
         )
 
-        total += _upsert_documents(docs[:limit])
+        docs = docs[:limit]
+        total += _upsert_documents(docs)
+        embedded.extend(docs)
         synced_locations.append(label)
 
-    return jsonify({"synced": total, "locations": synced_locations, "skipped": skipped})
+    # Vectorize the just-synced docs into the pgvector tables so each city is
+    # searchable immediately — the near-real-time payoff of the psycopg2/Lakebase
+    # design. Same execute_values + %s::vector path the notebook uses (Part 2),
+    # run inline here rather than as a separate batch job. See _embed_and_store.
+    n_docs, n_chunks = _embed_and_store(embedded)
+
+    return jsonify({
+        "synced": total,
+        "embedded": n_docs,
+        "chunks": n_chunks,
+        "locations": synced_locations,
+        "skipped": skipped,
+    })
 
 
 def _upsert_documents(docs: list[dict]) -> int:
@@ -269,6 +293,105 @@ def _upsert_documents(docs: list[dict]) -> int:
                 count += 1
             conn.commit()
     return count
+
+
+def _chunk(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
+    """Sliding character window (mirrors the notebook's chunker). Short text
+    returns a single chunk; long alert text splits with overlap to preserve
+    context across boundaries."""
+    text = (text or "").strip()
+    if len(text) <= size:
+        return [text] if text else []
+    step = max(1, size - overlap)
+    chunks = []
+    for start in range(0, len(text), step):
+        piece = text[start : start + size].strip()
+        if piece:
+            chunks.append(piece)
+        if start + size >= len(text):
+            break
+    return chunks
+
+
+def _vector_literal(vec) -> str:
+    """Render an embedding as a pgvector text literal '[0.1,0.2,...]' for the
+    explicit `%s::vector` cast (works without a registered pgvector adapter)."""
+    return "[" + ",".join(f"{x:.7f}" for x in vec) + "]"
+
+
+def _embed_and_store(docs: list[dict]) -> tuple[int, int]:
+    """Embed the given documents and upsert vectors into both pgvector tables.
+
+    Runs the SAME psycopg2 + execute_values + %s::vector path as the Part-2
+    notebook, but inline in the sync request so a freshly-synced city is
+    searchable immediately (the near-real-time payoff). Idempotent via ON
+    CONFLICT, so re-syncing refreshes vectors in place.
+
+    Returns (n_document_vectors, n_chunk_vectors).
+    """
+    if not docs:
+        return (0, 0)
+
+    model = get_embedding_model()  # same model used by /weather/search
+    doc_rows, chunk_rows = [], []
+    for doc in docs:
+        narrative = doc["narrative_text"]
+        # Document-level vector: headline + narrative as one unit.
+        doc_input = f"{doc.get('headline') or ''}\n\n{narrative}".strip()
+        doc_rows.append((
+            doc["id"], doc["location"], doc.get("headline"), doc["source_type"],
+            _vector_literal(model.encode(doc_input)), EMBEDDING_MODEL_NAME,
+        ))
+        # Chunk-level vectors: split the narrative, embed each window.
+        chunks = _chunk(narrative)
+        if chunks:
+            for idx, (chunk, vec) in enumerate(zip(chunks, model.encode(chunks))):
+                chunk_rows.append((
+                    f"{doc['id']}:{idx}", doc["id"], idx, chunk,
+                    _vector_literal(vec), EMBEDDING_MODEL_NAME,
+                ))
+
+    with lakebase.get_connection() as conn:
+        with conn.cursor() as cur:
+            execute_values(
+                cur,
+                f"""
+                INSERT INTO {EMBEDDINGS_TABLE}
+                    (document_id, location, headline, source_type, embedding, model_name)
+                VALUES %s
+                ON CONFLICT (document_id) DO UPDATE SET
+                    location    = EXCLUDED.location,
+                    headline    = EXCLUDED.headline,
+                    source_type = EXCLUDED.source_type,
+                    embedding   = EXCLUDED.embedding,
+                    model_name  = EXCLUDED.model_name,
+                    created_at  = now()
+                """,
+                doc_rows,
+                template="(%s, %s, %s, %s, %s::vector, %s)",
+                page_size=200,
+            )
+            if chunk_rows:
+                execute_values(
+                    cur,
+                    f"""
+                    INSERT INTO {CHUNK_EMBEDDINGS_TABLE}
+                        (id, document_id, chunk_index, chunk_text, embedding, model_name)
+                    VALUES %s
+                    ON CONFLICT (id) DO UPDATE SET
+                        document_id = EXCLUDED.document_id,
+                        chunk_index = EXCLUDED.chunk_index,
+                        chunk_text  = EXCLUDED.chunk_text,
+                        embedding   = EXCLUDED.embedding,
+                        model_name  = EXCLUDED.model_name,
+                        created_at  = now()
+                    """,
+                    chunk_rows,
+                    template="(%s, %s, %s, %s, %s::vector, %s)",
+                    page_size=200,
+                )
+        conn.commit()
+    return (len(doc_rows), len(chunk_rows))
 
 
 # ===========================================================================
@@ -349,11 +472,16 @@ def search_weather():
             "query": "flash flood risk this weekend",
             "top_k": 5,                      # clamped to 1..20
             "search_mode": "chunk",          # "chunk" (default) | "document"
-            "source_type": "alert"           # optional: "alert" | "forecast"
+            "source_type": "alert",          # optional: "alert" | "forecast"
+            "primary_city": "Milwaukee"      # optional: the user's active city
         }
 
-    Returns each match with location, headline, chunk_text (or narrative_text in
-    document mode), source_type, and a cosine similarity score in [0, 1].
+    Each match carries location, headline, chunk_text (or narrative_text in
+    document mode), source_type, effective/expires times, and cosine similarity
+    in [0, 1]. When `primary_city` is given, results are split into that city's
+    matches (`primary`) and everywhere else (`elsewhere`) — so the user's own
+    location is always surfaced first, even on a weak match; otherwise a single
+    `results` list is returned.
     """
     if not request.is_json:
         return jsonify({"error": "Request body must be JSON"}), 400
@@ -372,18 +500,33 @@ def search_weather():
     if source_type is not None and source_type not in ("alert", "forecast"):
         return jsonify({"error": "source_type must be 'alert' or 'forecast'"}), 400
 
-    # Embed the query with the SAME model used for ingestion. pgvector wants the
-    # vector as a string like "[0.1,0.2,...]"; a Python list str() is close, but
-    # we cast explicitly with %s::vector in SQL and pass the list — psycopg2 +
-    # pgvector's text form handles it.
+    # Optional "primary" city = the user's active location. When present, we run
+    # the search twice — filtered TO that city, and EXCLUDING it — so their own
+    # location is always shown first (even a weak match), with other cities that
+    # match the pattern surfaced separately as context ("Elsewhere").
+    primary_city = (body.get("primary_city") or "").strip() or None
+    if primary_city and (primary_city[0].isdigit() or primary_city[0] == "-"):
+        primary_city = None  # a raw "lat,lon" label — can't anchor by city name
+
+    # Embed the query with the SAME model used for ingestion, cast via %s::vector.
     model = get_embedding_model()
     query_vec = model.encode(query).tolist()
+    search = _search_chunks if search_mode == "chunk" else _search_documents
 
     try:
-        if search_mode == "chunk":
-            results = _search_chunks(query_vec, top_k, source_type)
-        else:
-            results = _search_documents(query_vec, top_k, source_type)
+        if primary_city:
+            primary = search(query_vec, top_k, source_type, city=primary_city, city_include=True)
+            elsewhere = search(query_vec, top_k, source_type, city=primary_city, city_include=False)
+            return jsonify({
+                "query": query,
+                "search_mode": search_mode,
+                "source_type": source_type,
+                "primary_city": primary_city,
+                "primary": primary,
+                "elsewhere": elsewhere,
+                "count": len(primary) + len(elsewhere),
+            })
+        results = search(query_vec, top_k, source_type)
     except Exception as exc:  # includes the "table doesn't exist yet" case
         logger.exception("Vector search failed")
         return jsonify({"error": f"Vector search failed: {exc}"}), 500
@@ -399,19 +542,30 @@ def search_weather():
     )
 
 
-def _search_chunks(query_vec: list[float], top_k: int, source_type: str | None):
+def _city_condition(city_include: bool) -> str:
+    """Match on the city token of d.location (e.g. 'Milwaukee' from 'Milwaukee,
+    WI'). NWS stores 'City, ST' while the picker uses 'City, State', so matching
+    the full label would fail — the city token bridges the two."""
+    op = "=" if city_include else "<>"
+    return f"lower(split_part(d.location, ',', 1)) {op} lower(%s)"
+
+
+def _search_chunks(query_vec: list[float], top_k: int, source_type: str | None,
+                   city: str | None = None, city_include: bool = True):
     """Chunk-level cosine search: join chunk vectors back to their documents.
 
-    `1 - (embedding <=> query)` converts cosine *distance* (0 = identical,
-    2 = opposite) into a cosine *similarity* score in [0, 1] for readability.
-    Note the vector is passed twice: once for the SELECT score, once for the
-    ORDER BY — pgvector can't reuse a computed column in ORDER BY here.
+    Optional filters: `source_type`, and a `city` include/exclude (to split
+    prioritized vs. "elsewhere" results). `1 - (embedding <=> query)` is cosine
+    similarity in [0, 1]; the vector is passed twice (SELECT score + ORDER BY)
+    because pgvector can't reuse the computed column in ORDER BY.
     """
-    # Optional source_type filter is applied on the documents side of the join.
-    filter_sql = "WHERE d.source_type = %s" if source_type else ""
+    conds: list[str] = []
     params: list = [query_vec]
     if source_type:
-        params.append(source_type)
+        conds.append("d.source_type = %s"); params.append(source_type)
+    if city:
+        conds.append(_city_condition(city_include)); params.append(city)
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
     params += [query_vec, top_k]
 
     return lakebase.run_query(
@@ -429,7 +583,7 @@ def _search_chunks(query_vec: list[float], top_k: int, source_type: str | None):
             1 - (e.embedding <=> %s::vector) AS similarity
         FROM {CHUNK_EMBEDDINGS_TABLE} e
         JOIN {DOCUMENTS_TABLE} d ON d.id = e.document_id
-        {filter_sql}
+        {where}
         ORDER BY e.embedding <=> %s::vector
         LIMIT %s
         """,
@@ -437,12 +591,16 @@ def _search_chunks(query_vec: list[float], top_k: int, source_type: str | None):
     )
 
 
-def _search_documents(query_vec: list[float], top_k: int, source_type: str | None):
+def _search_documents(query_vec: list[float], top_k: int, source_type: str | None,
+                      city: str | None = None, city_include: bool = True):
     """Document-level cosine search against the one-vector-per-document table."""
-    filter_sql = "WHERE e.source_type = %s" if source_type else ""
+    conds: list[str] = []
     params: list = [query_vec]
     if source_type:
-        params.append(source_type)
+        conds.append("e.source_type = %s"); params.append(source_type)
+    if city:
+        conds.append(_city_condition(city_include)); params.append(city)
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
     params += [query_vec, top_k]
 
     return lakebase.run_query(
@@ -458,7 +616,7 @@ def _search_documents(query_vec: list[float], top_k: int, source_type: str | Non
             1 - (e.embedding <=> %s::vector) AS similarity
         FROM {EMBEDDINGS_TABLE} e
         JOIN {DOCUMENTS_TABLE} d ON d.id = e.document_id
-        {filter_sql}
+        {where}
         ORDER BY e.embedding <=> %s::vector
         LIMIT %s
         """,
