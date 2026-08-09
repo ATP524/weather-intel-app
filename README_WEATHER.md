@@ -37,10 +37,14 @@ forecast directly. `GET /points/{lat},{lon}` returns a forecast **office** +
 Alerts are queried by **state** (`GET /alerts/active?area={ST}`). `/points` also
 reverse-geocodes to a city/state, which we use as the display label.
 
-**Location input:** `/weather/sync` accepts curated city names (e.g.
-`"Chicago, IL"` — see `CITY_COORDS` in `weather_client.py`) **and** raw
-`"lat,lon"` pairs. NWS does no geocoding, so arbitrary city names outside the
-curated map won't resolve — extend `CITY_COORDS` or pass coordinates.
+**Location input:** `/weather/sync` accepts **any US city name** or a raw
+`"lat,lon"` pair. Because NWS itself does no geocoding, `resolve_location()`
+resolves names in four tiers (cheapest first): a small curated `CITY_COORDS`
+seed map (offline), raw coordinate parsing, an in-process cache, then the
+**Open-Meteo geocoding API** (free, no key) for everything else — filtered to
+US results since that's NWS's coverage. The UI's location box is a type-ahead
+backed by `GET /weather/geocode`, so users pick a real match (disambiguating,
+e.g., Milwaukee, WI vs Milwaukie, OR) instead of guessing a format.
 
 ---
 
@@ -144,8 +148,10 @@ python app.py             # serves on :8000
 
 ## 5. Known limitations & next steps
 
-- **Curated geocoding only.** Cities outside `CITY_COORDS` need a `lat,lon`
-  pair. A real deployment would call a geocoder (e.g. the free US Census API).
+- **US-only + external geocoder dependency.** City names resolve via Open-Meteo
+  (filtered to US, since NWS only covers the US). Non-US places won't resolve,
+  and syncing an un-cached city adds one geocoding round-trip. The in-process
+  cache is per-worker and not shared across app replicas.
 - **Full re-embed each run.** The notebook embeds every document each run
   (idempotent via upsert). For scale, add a LEFT JOIN anti-filter against
   `weather_embeddings` to embed only new rows.

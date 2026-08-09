@@ -46,10 +46,17 @@ _USER_AGENT = os.environ.get(
 
 _DEFAULT_TIMEOUT = 30
 
-# --- Curated city -> (lat, lon) lookup -------------------------------------
-# /points only accepts coordinates; NWS does no geocoding. Rather than pull in
-# an external geocoder, we ship a small map of common US cities so the
-# assignment's `"Chicago, IL"` style input works out of the box. Extend freely.
+# Open-Meteo geocoding endpoint (free, no API key). Turns a free-text place name
+# into ranked coordinate candidates. Overridable via env for tests/mocks.
+_GEOCODER_URL = os.environ.get(
+    "WEATHER_GEOCODER_URL", "https://geocoding-api.open-meteo.com/v1/search"
+)
+
+# --- Curated city -> (lat, lon) seed cache ---------------------------------
+# /points only accepts coordinates; NWS does no geocoding. These common cities
+# resolve instantly with ZERO network calls. Anything not listed here falls
+# through to the Open-Meteo geocoder in resolve_location() — so this map is a
+# fast-path cache, not a limit on which cities are allowed.
 # Keys are normalized to lowercase "city, st" (see _normalize_location_key).
 CITY_COORDS: dict[str, tuple[float, float]] = {
     "chicago, il": (41.8781, -87.6298),
@@ -72,33 +79,98 @@ def _normalize_location_key(location: str) -> str:
     return ", ".join(part.strip() for part in location.lower().split(",")).strip()
 
 
+# Small in-process cache so repeatedly syncing the same place name doesn't
+# re-hit the geocoder within a running app. Keyed by the normalized string.
+_geocode_cache: dict[str, tuple[float, float, str]] = {}
+
+
+def _try_parse_latlon(location: str) -> tuple[float, float] | None:
+    """Parse a 'lat,lon' string into floats, or return None if it isn't one."""
+    try:
+        lat_str, lon_str = location.split(",")
+        return float(lat_str), float(lon_str)
+    except (ValueError, AttributeError):
+        return None
+
+
+def geocode(query: str, limit: int = 5) -> list[dict]:
+    """
+    Resolve a free-text place name to ranked US coordinate candidates via the
+    Open-Meteo geocoding API (free, no key).
+
+    NWS only covers the US and its territories, so we keep only `country_code ==
+    "US"` matches (Open-Meteo has no server-side country filter, so we over-fetch
+    and filter here). Returns a list of {"label", "lat", "lon", "state"} dicts,
+    best match first — or an empty list when nothing matches. This powers both
+    the /weather/geocode autocomplete and the resolve_location() fallback.
+    """
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    resp = requests.get(
+        _GEOCODER_URL,
+        params={"name": q, "count": max(limit * 2, 10), "language": "en", "format": "json"},
+        timeout=_DEFAULT_TIMEOUT,
+    )
+    resp.raise_for_status()
+
+    out: list[dict] = []
+    for r in resp.json().get("results") or []:
+        if r.get("country_code") != "US":
+            continue
+        state = r.get("admin1")  # full state name, e.g. "Wisconsin"
+        label = f"{r['name']}, {state}" if state else r["name"]
+        out.append(
+            {"label": label, "lat": r["latitude"], "lon": r["longitude"], "state": state}
+        )
+        if len(out) >= limit:
+            break
+    return out
+
+
 def resolve_location(location: str) -> tuple[float, float, str]:
     """
     Turn a user-supplied location into (lat, lon, canonical_label).
 
-    Accepts either:
-      * a curated city name, e.g. "Chicago, IL"
-      * a raw coordinate pair, e.g. "41.88,-87.63"
+    Resolution order, cheapest first:
+      1. curated seed map     — "Chicago, IL", zero network
+      2. raw coordinate pair  — "41.88,-87.63"
+      3. geocode cache        — a place already looked up this run
+      4. Open-Meteo geocoder  — any other US city/place name
 
-    Raises ValueError for anything we can't resolve, so /weather/sync can
-    return a clean 400 instead of a confusing downstream NWS error.
+    Raises ValueError only when the geocoder returns no US match, so
+    /weather/sync can report a clean, specific reason for that one location
+    instead of failing the whole batch.
     """
     key = _normalize_location_key(location)
+
+    # 1. Curated fast-path (offline).
     if key in CITY_COORDS:
         lat, lon = CITY_COORDS[key]
         return lat, lon, location.strip()
 
-    # Fall back to parsing "lat,lon". We split on comma and float() each half;
-    # any malformed input raises ValueError, which is exactly what we want.
-    try:
-        lat_str, lon_str = location.split(",")
-        lat, lon = float(lat_str), float(lon_str)
-    except (ValueError, AttributeError):
-        raise ValueError(
-            f"Unrecognized location {location!r}: expected a known city "
-            f'(e.g. "Chicago, IL") or a "lat,lon" pair.'
-        )
-    return lat, lon, f"{lat},{lon}"
+    # 2. Raw "lat,lon".
+    coords = _try_parse_latlon(location)
+    if coords:
+        return coords[0], coords[1], f"{coords[0]},{coords[1]}"
+
+    # 3. Already geocoded this run.
+    if key in _geocode_cache:
+        return _geocode_cache[key]
+
+    # 4. Geocode (one network call), then cache the winner so re-syncs are free.
+    matches = geocode(location, limit=1)
+    if matches:
+        m = matches[0]
+        resolved = (m["lat"], m["lon"], m["label"])
+        _geocode_cache[key] = resolved
+        return resolved
+
+    raise ValueError(
+        f"Could not resolve {location!r} to a US place. Try a city like "
+        f'"Milwaukee, WI", or a "lat,lon" pair.'
+    )
 
 
 class WeatherClient:

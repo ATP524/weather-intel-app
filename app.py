@@ -31,7 +31,7 @@ import requests
 from flask import Flask, jsonify, render_template, request
 
 import lakebase
-from weather_client import WeatherClient, resolve_location
+from weather_client import WeatherClient, geocode, resolve_location
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("weather-app")
@@ -263,6 +263,35 @@ def _upsert_documents(docs: list[dict]) -> int:
                 count += 1
             conn.commit()
     return count
+
+
+# ===========================================================================
+# Location autocomplete:  GET /weather/geocode
+# ===========================================================================
+@app.route("/weather/geocode", methods=["GET"])
+def geocode_locations():
+    """
+    Type-ahead helper for the UI. Resolves a partial place name to ranked US
+    coordinate candidates so users never have to guess a format or know a
+    curated list. The browser calls this instead of hitting the geocoder
+    directly, which keeps the provider swappable and CORS a non-issue.
+
+    Query params:
+        q     — the (partial) place name; empty returns no results.
+        limit — max candidates, clamped 1..10 (default 5).
+
+    Returns: {"query": q, "results": [{"label","lat","lon","state"}, ...]}
+    """
+    q = request.args.get("q", "").strip()
+    limit = _coerce_int(request.args.get("limit"), default=5, low=1, high=10)
+    if not q:
+        return jsonify({"query": q, "results": []})
+    try:
+        results = geocode(q, limit=limit)
+    except requests.HTTPError as exc:
+        logger.warning("Geocoding failed for %r: %s", q, exc)
+        return jsonify({"error": f"Geocoding failed: {exc}"}), 502
+    return jsonify({"query": q, "results": results})
 
 
 # ===========================================================================
