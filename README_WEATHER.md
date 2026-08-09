@@ -46,6 +46,22 @@ US results since that's NWS's coverage. The UI's location box is a type-ahead
 backed by `GET /weather/geocode`, so users pick a real match (disambiguating,
 e.g., Milwaukee, WI vs Milwaukie, OR) instead of guessing a format.
 
+**Deliberate source split (NWS vs Open-Meteo):** the graded pipeline — harvest
+→ embed → search — is **100% NWS**. The UI's left-hand **Live Conditions panel**
+(`GET /weather/conditions`) is a display-only add-on that sources
+yesterday/today/tomorrow summaries and current air quality (US AQI + PM2.5/10 +
+ozone) from **Open-Meteo**, because NWS is forward-only (no "yesterday") and
+carries no air-quality data. No allergen/pollen data is shown — it's empty for
+the US on every free source (Open-Meteo's pollen is Europe-only; US pollen APIs
+require paid keys).
+
+**Interpreting search scores:** results are ranked by cosine similarity between
+the query embedding and the alert/forecast text — i.e. *how closely an ingested
+NWS document describes your query*, **not a probability the weather will occur**.
+The UI shows this as Strong/Moderate/Weak match badges (raw cosine in a tooltip)
+plus each result's active/effective time window, so "match" reads as "this is in
+the alerts/forecast for the next ~7 days," which is the app's real utility.
+
 ---
 
 ## 2. Schema decisions

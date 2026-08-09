@@ -31,7 +31,13 @@ import requests
 from flask import Flask, jsonify, render_template, request
 
 import lakebase
-from weather_client import WeatherClient, geocode, resolve_location
+from weather_client import (
+    WeatherClient,
+    air_quality,
+    daily_weather,
+    geocode,
+    resolve_location,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("weather-app")
@@ -295,36 +301,38 @@ def geocode_locations():
 
 
 # ===========================================================================
-# Live forecast (UI view):  GET /weather/forecast
+# Live conditions (UI panel):  GET /weather/conditions
 # ===========================================================================
-@app.route("/weather/forecast", methods=["GET"])
-def weather_forecast():
+@app.route("/weather/conditions", methods=["GET"])
+def weather_conditions():
     """
-    Live multi-day forecast for a single location, powering the UI's Forecast
-    view. Resolves the location to an NWS grid and returns the forecast periods
-    straight from NWS — it reads live and does NOT touch Lakebase, so it works
-    even before anything has been synced or embedded.
+    Yesterday/today/tomorrow weather + current air quality for one location,
+    powering the UI's left-hand Conditions panel.
+
+    Sourced from Open-Meteo (free, no key) — NWS is forward-only (no yesterday)
+    and has no air-quality data. This reads live and does NOT touch Lakebase, so
+    it works before anything is synced. The graded search pipeline stays NWS.
 
     Query param: location — a US city name or "lat,lon".
-    Returns: {"location": label, "periods": [{name, temperature, ...}, ...]}
+    Returns: {"location", "days": [...3...], "air_quality": {...}}
     """
     location = request.args.get("location", "").strip()
     if not location:
         return jsonify({"error": "'location' is required"}), 400
 
-    client = WeatherClient()
     try:
         lat, lon, label = resolve_location(location)
-        grid = client.resolve_point(lat, lon)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    except (requests.HTTPError, KeyError) as exc:
-        return jsonify({"error": f"NWS lookup failed: {exc}"}), 502
 
-    if grid.get("city") and grid.get("state"):
-        label = f"{grid['city']}, {grid['state']}"
-    periods = client.get_forecast_periods(grid["office"], grid["grid_x"], grid["grid_y"])
-    return jsonify({"location": label, "periods": periods})
+    try:
+        days = daily_weather(lat, lon)
+        air = air_quality(lat, lon)
+    except requests.HTTPError as exc:
+        logger.warning("Conditions lookup failed for %r: %s", location, exc)
+        return jsonify({"error": f"Conditions lookup failed: {exc}"}), 502
+
+    return jsonify({"location": label, "days": days, "air_quality": air})
 
 
 # ===========================================================================
@@ -413,6 +421,8 @@ def _search_chunks(query_vec: list[float], top_k: int, source_type: str | None):
             d.location,
             d.headline,
             d.source_type,
+            d.effective_at,
+            d.expires_at,
             d.narrative_text,
             e.chunk_text,
             e.chunk_index,
@@ -442,6 +452,8 @@ def _search_documents(query_vec: list[float], top_k: int, source_type: str | Non
             d.location,
             d.headline,
             d.source_type,
+            d.effective_at,
+            d.expires_at,
             d.narrative_text,
             1 - (e.embedding <=> %s::vector) AS similarity
         FROM {EMBEDDINGS_TABLE} e

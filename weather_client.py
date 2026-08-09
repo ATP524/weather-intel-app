@@ -52,6 +52,31 @@ _GEOCODER_URL = os.environ.get(
     "WEATHER_GEOCODER_URL", "https://geocoding-api.open-meteo.com/v1/search"
 )
 
+# Open-Meteo forecast + air-quality endpoints (free, no key). NWS is forward-only
+# and carries no air-quality data, so the UI's Live Conditions panel sources
+# yesterday/today/tomorrow and AQI from here. The graded harvest -> embed ->
+# search pipeline stays 100% NWS; only this display panel mixes in Open-Meteo.
+_OPEN_METEO_FORECAST_URL = os.environ.get(
+    "WEATHER_DAILY_URL", "https://api.open-meteo.com/v1/forecast"
+)
+_OPEN_METEO_AIR_QUALITY_URL = os.environ.get(
+    "WEATHER_AIR_QUALITY_URL", "https://air-quality-api.open-meteo.com/v1/air-quality"
+)
+
+# WMO weather codes (Open-Meteo `weathercode`) -> (emoji, short description).
+_WMO_CODES: dict[int, tuple[str, str]] = {
+    0: ("☀️", "Clear"), 1: ("🌤️", "Mainly clear"), 2: ("⛅", "Partly cloudy"),
+    3: ("☁️", "Overcast"), 45: ("🌫️", "Fog"), 48: ("🌫️", "Freezing fog"),
+    51: ("🌦️", "Light drizzle"), 53: ("🌦️", "Drizzle"), 55: ("🌧️", "Dense drizzle"),
+    56: ("🌧️", "Freezing drizzle"), 57: ("🌧️", "Freezing drizzle"),
+    61: ("🌧️", "Light rain"), 63: ("🌧️", "Rain"), 65: ("🌧️", "Heavy rain"),
+    66: ("🌧️", "Freezing rain"), 67: ("🌧️", "Freezing rain"),
+    71: ("🌨️", "Light snow"), 73: ("🌨️", "Snow"), 75: ("❄️", "Heavy snow"),
+    77: ("❄️", "Snow grains"), 80: ("🌦️", "Rain showers"), 81: ("🌧️", "Rain showers"),
+    82: ("⛈️", "Violent showers"), 85: ("🌨️", "Snow showers"), 86: ("❄️", "Snow showers"),
+    95: ("⛈️", "Thunderstorm"), 96: ("⛈️", "Thunderstorm, hail"), 99: ("⛈️", "Severe thunderstorm"),
+}
+
 # --- Curated city -> (lat, lon) seed cache ---------------------------------
 # /points only accepts coordinates; NWS does no geocoding. These common cities
 # resolve instantly with ZERO network calls. Anything not listed here falls
@@ -127,6 +152,103 @@ def geocode(query: str, limit: int = 5) -> list[dict]:
         if len(out) >= limit:
             break
     return out
+
+
+def daily_weather(lat: float, lon: float) -> list[dict]:
+    """
+    Yesterday / today / tomorrow daily summaries from Open-Meteo (free, no key).
+
+    NWS is forward-only, so "yesterday" cannot come from it — we use Open-Meteo's
+    `past_days=1` here. Returns three dicts: {label, date, emoji, description,
+    temp_max, temp_min, precip_prob}.
+    """
+    resp = requests.get(
+        _OPEN_METEO_FORECAST_URL,
+        params={
+            "latitude": lat,
+            "longitude": lon,
+            "daily": "weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+            "past_days": 1,
+            "forecast_days": 2,
+            "temperature_unit": "fahrenheit",
+            "timezone": "auto",
+        },
+        timeout=_DEFAULT_TIMEOUT,
+    )
+    resp.raise_for_status()
+    d = resp.json().get("daily", {})
+    times = d.get("time", [])
+    labels = ["Yesterday", "Today", "Tomorrow"]
+
+    def col(name: str) -> list:
+        return d.get(name) or [None] * len(times)
+
+    codes, tmax, tmin, pprob = (
+        col("weathercode"), col("temperature_2m_max"),
+        col("temperature_2m_min"), col("precipitation_probability_max"),
+    )
+    out = []
+    for i, day in enumerate(times[:3]):
+        emoji, desc = _WMO_CODES.get(codes[i], ("🌡️", "—"))
+        out.append(
+            {
+                "label": labels[i] if i < len(labels) else day,
+                "date": day,
+                "emoji": emoji,
+                "description": desc,
+                "temp_max": tmax[i],
+                "temp_min": tmin[i],
+                "precip_prob": pprob[i],
+            }
+        )
+    return out
+
+
+def _aqi_category(aqi: float | None) -> tuple[str, str]:
+    """Map a US AQI value to its EPA category name + a display color."""
+    if aqi is None:
+        return ("Unknown", "#94a3b8")
+    if aqi <= 50:
+        return ("Good", "#34d399")
+    if aqi <= 100:
+        return ("Moderate", "#fbbf24")
+    if aqi <= 150:
+        return ("Unhealthy for sensitive groups", "#fb923c")
+    if aqi <= 200:
+        return ("Unhealthy", "#f87171")
+    if aqi <= 300:
+        return ("Very unhealthy", "#c084fc")
+    return ("Hazardous", "#9f1239")
+
+
+def air_quality(lat: float, lon: float) -> dict:
+    """
+    Current US AQI + particulates from the Open-Meteo Air Quality API (free, no
+    key). NWS provides no air-quality data. Returns {us_aqi, category, color,
+    pm2_5, pm10, ozone}.
+    """
+    resp = requests.get(
+        _OPEN_METEO_AIR_QUALITY_URL,
+        params={
+            "latitude": lat,
+            "longitude": lon,
+            "current": "us_aqi,pm2_5,pm10,ozone",
+            "timezone": "auto",
+        },
+        timeout=_DEFAULT_TIMEOUT,
+    )
+    resp.raise_for_status()
+    cur = resp.json().get("current", {})
+    aqi = cur.get("us_aqi")
+    category, color = _aqi_category(aqi)
+    return {
+        "us_aqi": aqi,
+        "category": category,
+        "color": color,
+        "pm2_5": cur.get("pm2_5"),
+        "pm10": cur.get("pm10"),
+        "ozone": cur.get("ozone"),
+    }
 
 
 def resolve_location(location: str) -> tuple[float, float, str]:
@@ -291,39 +413,6 @@ class WeatherClient:
                 "expires_at": period.get("endTime"),
                 "payload": period,
             }
-
-    def get_forecast_periods(
-        self, office: str, grid_x: int, grid_y: int
-    ) -> list[dict]:
-        """
-        Return the multi-day forecast as display-ready period dicts for the UI's
-        live Forecast view — temperature, wind, and short/detailed text.
-
-        This is the presentation-oriented sibling of get_forecast(): that method
-        yields embedding documents (headline + narrative only) for /weather/sync,
-        whereas this returns the richer fields a human wants to see, straight
-        from NWS with no Lakebase involved.
-        """
-        data = self.get(f"/gridpoints/{office}/{grid_x},{grid_y}/forecast")
-        periods = []
-        for p in data.get("properties", {}).get("periods", []):
-            wind = " ".join(
-                part for part in (p.get("windSpeed"), p.get("windDirection")) if part
-            )
-            periods.append(
-                {
-                    "name": p.get("name"),
-                    "start_time": p.get("startTime"),
-                    "is_daytime": p.get("isDaytime"),
-                    "temperature": p.get("temperature"),
-                    "temperature_unit": p.get("temperatureUnit"),
-                    "wind": wind,
-                    "short_forecast": p.get("shortForecast"),
-                    "detailed_forecast": p.get("detailedForecast"),
-                }
-            )
-        return periods
-
 
 def _forecast_id(location_label: str, start_time: str | None) -> str:
     """Stable dedup key for a forecast period: sha256(location|start_time).

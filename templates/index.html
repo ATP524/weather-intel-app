@@ -18,13 +18,13 @@
       background: var(--bg); color: var(--text);
     }
     a { color: var(--accent); }
-    header { padding: 28px 20px 10px; max-width: 860px; margin: 0 auto; }
+    header { padding: 26px 20px 6px; max-width: 1060px; margin: 0 auto; }
     h1 { margin: 0 0 4px; font-size: 22px; }
     .sub { color: var(--muted); margin: 0; }
-    main { max-width: 860px; margin: 0 auto; padding: 12px 20px 20px; }
+    main { max-width: 1060px; margin: 0 auto; padding: 12px 20px 20px; }
     section {
       background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-      padding: 18px; margin-top: 18px;
+      padding: 18px; margin-top: 16px;
     }
     h2 { margin: 0 0 4px; font-size: 15px; text-transform: uppercase;
          letter-spacing: .04em; color: var(--muted); }
@@ -43,20 +43,18 @@
     }
     button:disabled { opacity: .55; cursor: default; }
     .status { margin-top: 10px; font-size: 13px; color: var(--muted); min-height: 18px; }
-    .card {
-      border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
-      margin-top: 10px; background: #0b1220;
-    }
-    .card .top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
-    .loc { font-weight: 600; }
-    .sim { color: var(--good); font-variant-numeric: tabular-nums; font-size: 13px; }
-    .snippet { color: var(--text); margin-top: 6px; font-size: 14px; }
     .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
 
-    /* --- Location autocomplete + chips --- */
+    /* Two-column layout: sticky Conditions sidebar + main column. */
+    .grid2 { display: grid; grid-template-columns: 300px 1fr; gap: 16px; align-items: start; }
+    .grid2 > .left { position: sticky; top: 14px; }
+    @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } .grid2 > .left { position: static; } }
+    section.topbar { margin-top: 16px; }
+
+    /* Location autocomplete + chips */
     .combo { position: relative; }
     .suggest {
-      position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px);
+      position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px);
       background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
       overflow: hidden; box-shadow: 0 10px 28px rgba(0,0,0,.45);
     }
@@ -67,211 +65,179 @@
     .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
     .chip {
       display: inline-flex; align-items: center; gap: 7px; background: #0b1220;
-      border: 1px solid var(--line); border-radius: 999px; padding: 4px 6px 4px 11px;
-      font-size: 13px;
+      border: 1px solid var(--line); border-radius: 999px; padding: 4px 6px 4px 11px; font-size: 13px;
     }
-    .chip button {
-      all: unset; cursor: pointer; color: var(--muted); font-size: 15px;
-      line-height: 1; padding: 0 3px; margin: 0;
-    }
+    .chip button { all: unset; cursor: pointer; color: var(--muted); font-size: 15px; line-height: 1; padding: 0 3px; }
     .chip button:hover { color: var(--text); }
 
-    /* --- Live forecast cards --- */
-    .fc-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
-      gap: 10px; margin-top: 12px;
-    }
-    .fc-card {
-      background: #0b1220; border: 1px solid var(--line); border-radius: 10px;
-      padding: 12px 10px; text-align: center;
-    }
-    .fc-emoji { font-size: 26px; line-height: 1; }
-    .fc-name { font-size: 12px; color: var(--muted); margin-top: 6px; min-height: 2.6em; }
-    .fc-temp { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
-    .fc-short { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    /* Conditions panel */
+    .cond-days { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .cond-card { background:#0b1220; border:1px solid var(--line); border-radius:10px; padding:10px 6px; text-align:center; }
+    .cond-emoji { font-size:22px; line-height:1; }
+    .cond-label { font-size:11px; color:var(--muted); margin-top:4px; }
+    .cond-temp { font-size:13px; font-weight:600; margin-top:3px; font-variant-numeric:tabular-nums; }
+    .cond-desc { font-size:11px; color:var(--muted); margin-top:3px; min-height:2.6em; }
+    .cond-precip { font-size:11px; color:var(--muted); margin-top:2px; }
+    .aqi { display:flex; align-items:center; gap:8px; margin-top:12px; padding:8px 10px; border:1px solid var(--line); border-radius:10px; font-size:13px; }
+    .aqi-dot { width:10px; height:10px; border-radius:50%; display:inline-block; flex:none; }
 
-    /* --- Advanced settings disclosure --- */
+    /* Advanced disclosure */
     details.adv { margin-top: 12px; }
-    details.adv > summary {
-      cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; user-select: none;
-    }
+    details.adv > summary { cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; user-select: none; }
     details.adv > summary::-webkit-details-marker { display: none; }
     details.adv > summary::before { content: "▸ "; }
     details.adv[open] > summary::before { content: "▾ "; }
 
-    footer {
-      max-width: 860px; margin: 0 auto; padding: 8px 20px 44px;
-      color: var(--muted); font-size: 12px;
-    }
+    /* Search results */
+    .card { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-top: 10px; background: #0b1220; }
+    .card .top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+    .loc { font-weight: 600; }
+    .badge { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:999px; color:var(--accent-ink); white-space:nowrap; }
+    .when { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .snippet { color: var(--text); margin-top: 6px; font-size: 14px; }
+
+    footer { max-width: 1060px; margin: 0 auto; padding: 8px 20px 44px; color: var(--muted); font-size: 12px; }
   </style>
 </head>
 <body>
   <header>
     <h1>🌦️ Weather Intelligence</h1>
-    <p class="sub">Live forecasts and semantic search over NWS alerts &amp; forecasts, powered by Lakebase + pgvector.</p>
+    <p class="sub">Is a weather pattern in the forecast? Check live conditions and search NWS alerts &amp; forecasts by meaning.</p>
   </header>
 
   <main>
-    <!-- ── Live forecast (casual entry point — reads live, no setup) ──────── -->
-    <section>
-      <h2>Live forecast</h2>
-      <p class="desc">Type any US city to see its multi-day forecast, straight from the National Weather Service.</p>
-      <div class="combo">
-        <input id="fcInput" autocomplete="off" placeholder="Search a city… e.g. Milwaukee, Denver, Miami" />
-        <div id="fcSuggest" class="suggest" hidden></div>
-      </div>
-      <div id="fcStatus" class="status"></div>
-      <div id="fcResults" class="fc-grid"></div>
-    </section>
-
-    <!-- ── Semantic search ───────────────────────────────────────────────── -->
-    <section>
-      <h2>Search</h2>
-      <p class="desc">Ask in plain language; results are ranked by meaning across synced alerts &amp; forecasts.</p>
-      <label for="query">Your question</label>
-      <input id="query" value="flash flood risk this weekend"
-             placeholder="e.g. excessive heat warning" />
-
-      <details class="adv">
-        <summary>Advanced settings</summary>
-        <div class="row">
-          <div>
-            <label for="mode">Search mode</label>
-            <select id="mode">
-              <option value="chunk">chunk (passage-level)</option>
-              <option value="document">document (whole-doc)</option>
-            </select>
-          </div>
-          <div>
-            <label for="source">Source filter</label>
-            <select id="source">
-              <option value="">any</option>
-              <option value="alert">alert</option>
-              <option value="forecast">forecast</option>
-            </select>
-          </div>
-          <div>
-            <label for="topk">Top K (1–20)</label>
-            <input id="topk" type="number" value="5" min="1" max="20" />
-          </div>
-        </div>
-      </details>
-
-      <button id="searchBtn">Search</button>
-      <div id="searchStatus" class="status"></div>
-      <div id="results"></div>
-    </section>
-
-    <!-- ── Sync (ingestion / admin) ──────────────────────────────────────── -->
-    <section>
-      <h2>Sync from NWS</h2>
-      <p class="desc">
-        <strong>NWS</strong> is the U.S. <a href="https://www.weather.gov" target="_blank" rel="noopener">National
-        Weather Service</a> (weather.gov). This harvests live alerts &amp; multi-day forecasts for the chosen cities
-        into Lakebase, so the search above has data to work with.
-      </p>
-      <label for="locInput">Cities to harvest</label>
+    <!-- Shared location: drives BOTH the Conditions panel and the sync list. -->
+    <section class="topbar">
+      <label for="locInput">Location — used for live conditions and syncing</label>
       <div class="combo">
         <input id="locInput" autocomplete="off"
-               placeholder="Start typing… e.g. Milwaukee, New York, Denver" />
+               placeholder="Search any US city… e.g. Milwaukee, New York, Denver" />
         <div id="locSuggest" class="suggest" hidden></div>
       </div>
-      <div id="locChips" class="chips"></div>
-      <p class="hint">Pick a match (↑/↓ + Enter works), or paste a "lat,lon" pair. Add as many as you like.</p>
-      <div class="row">
-        <div>
-          <label for="limit">Max docs per city</label>
-          <input id="limit" type="number" value="20" min="1" max="500" />
-        </div>
-      </div>
-      <button id="syncBtn">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6 9.5 3.5 3.5 0 0 0 7 18z" fill="currentColor"/>
-        </svg>
-        Sync from NWS
-      </button>
-      <div id="syncStatus" class="status"></div>
+      <p class="hint">Pick a match (↑/↓ + Enter works) or paste a "lat,lon" pair. Each pick loads its conditions and queues it for syncing.</p>
     </section>
+
+    <div class="grid2">
+      <!-- LEFT: live conditions for the most recently picked city -->
+      <aside class="left">
+        <section style="margin-top:0">
+          <h2 id="condTitle">Live conditions</h2>
+          <p class="desc">Yesterday · today · tomorrow, plus air quality.</p>
+          <div id="condBody"><p class="hint">Search a city above to see its conditions.</p></div>
+        </section>
+      </aside>
+
+      <!-- MAIN: sync (ingest) then search -->
+      <div class="main-col">
+        <section style="margin-top:0">
+          <h2>Sync from NWS</h2>
+          <p class="desc">
+            <strong>NWS</strong> is the U.S. <a href="https://www.weather.gov" target="_blank" rel="noopener">National
+            Weather Service</a>. This harvests live alerts &amp; the 7-day forecast for your chosen cities into Lakebase,
+            giving the search below something to match against.
+          </p>
+          <div id="locChips" class="chips"></div>
+          <div class="row">
+            <div>
+              <label for="limit">Max docs per city</label>
+              <input id="limit" type="number" value="20" min="1" max="500" />
+            </div>
+          </div>
+          <button id="syncBtn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6 9.5 3.5 3.5 0 0 0 7 18z" fill="currentColor"/>
+            </svg>
+            Sync from NWS
+          </button>
+          <div id="syncStatus" class="status"></div>
+        </section>
+
+        <section>
+          <h2>Search</h2>
+          <p class="desc">Describe a weather pattern; results are the closest-matching alerts &amp; forecasts for your synced cities.</p>
+          <label for="query">Your question</label>
+          <input id="query" value="flash flood risk this weekend" placeholder="e.g. excessive heat warning" />
+
+          <details class="adv">
+            <summary>Advanced settings</summary>
+            <div class="row">
+              <div>
+                <label for="mode">Search mode</label>
+                <select id="mode">
+                  <option value="chunk">chunk (passage-level)</option>
+                  <option value="document">document (whole-doc)</option>
+                </select>
+              </div>
+              <div>
+                <label for="source">Source filter</label>
+                <select id="source">
+                  <option value="">any</option>
+                  <option value="alert">alert</option>
+                  <option value="forecast">forecast</option>
+                </select>
+              </div>
+              <div>
+                <label for="topk">Top K (1–20)</label>
+                <input id="topk" type="number" value="5" min="1" max="20" />
+              </div>
+            </div>
+          </details>
+
+          <button id="searchBtn">Search</button>
+          <div id="searchStatus" class="status"></div>
+          <p class="hint" id="resultsCaption" hidden>
+            Matches reflect currently active alerts and the ~7-day forecast for your synced cities. A “match” is
+            semantic similarity to the alert/forecast text — how closely it describes your query, not a probability
+            the weather will occur.
+          </p>
+          <div id="results"></div>
+        </section>
+      </div>
+    </div>
   </main>
 
   <footer>
-    Weather data courtesy of the U.S. <a href="https://www.weather.gov" target="_blank" rel="noopener">National
-    Weather Service</a> (weather.gov). This project is independent and not affiliated with or endorsed by NOAA/NWS.
+    Weather &amp; air-quality data from the U.S. <a href="https://www.weather.gov" target="_blank" rel="noopener">National
+    Weather Service</a> and <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>. Search corpus
+    is NWS-only; the conditions panel adds Open-Meteo for past-day and air-quality data. Independent project, not
+    affiliated with or endorsed by NOAA/NWS.
   </footer>
 
   <script>
     const $ = id => document.getElementById(id);
+    const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
     async function postJSON(path, body) {
-      const resp = await fetch(path, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const resp = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       return data;
     }
 
-    const debounce = (fn, ms) => {
-      let t;
-      return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
-    };
-
-    // ── Reusable city autocomplete ───────────────────────────────────────
-    // Binds an <input> + suggestion <div> to /weather/geocode; calls onPick(r)
-    // with {label, lat, lon, state} when a candidate is chosen (click, Enter,
-    // or a pasted "lat,lon"). Used by both the forecast and sync inputs.
+    // ── Reusable city autocomplete (calls onPick with {label,lat,lon,state}) ──
     function attachAutocomplete(input, suggest, onPick) {
       let items = [], active = -1;
-
       const hide = () => { items = []; active = -1; suggest.hidden = true; suggest.innerHTML = ""; };
-      const paint = () => suggest.querySelectorAll(".opt")
-        .forEach((o, i) => o.classList.toggle("active", i === active));
-
+      const paint = () => suggest.querySelectorAll(".opt").forEach((o, i) => o.classList.toggle("active", i === active));
       const render = (list) => {
         items = list; active = -1; suggest.innerHTML = "";
-        if (!list.length) {
-          const e = document.createElement("div");
-          e.className = "empty"; e.textContent = "No US matches";
-          suggest.append(e); suggest.hidden = false; return;
-        }
+        if (!list.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "No US matches"; suggest.append(e); suggest.hidden = false; return; }
         list.forEach((r) => {
-          const opt = document.createElement("div");
-          opt.className = "opt";
-          const city = document.createElement("span");
-          city.textContent = (r.label || "").split(",")[0];   // textContent — no HTML injection
-          const st = document.createElement("span");
-          st.className = "st"; st.textContent = r.state || "";
+          const opt = document.createElement("div"); opt.className = "opt";
+          const city = document.createElement("span"); city.textContent = (r.label || "").split(",")[0];
+          const st = document.createElement("span"); st.className = "st"; st.textContent = r.state || "";
           opt.append(city, st);
-          opt.addEventListener("mousedown", (e) => {   // mousedown beats input blur
-            e.preventDefault(); onPick(r); input.value = ""; hide();
-          });
+          opt.addEventListener("mousedown", (e) => { e.preventDefault(); onPick(r); input.value = ""; hide(); });
           suggest.append(opt);
         });
         suggest.hidden = false;
       };
-
-      const fetchGeo = debounce(async (q) => {
-        try {
-          const resp = await fetch(`/weather/geocode?q=${encodeURIComponent(q)}&limit=6`);
-          const data = await resp.json();
-          render(data.results || []);
-        } catch { hide(); }
-      }, 250);
-
-      input.addEventListener("input", (e) => {
-        const q = e.target.value.trim();
-        if (q.length < 2) { hide(); return; }
-        fetchGeo(q);
-      });
-
+      const fetchGeo = debounce(async (q) => { try { const r = await fetch(`/weather/geocode?q=${encodeURIComponent(q)}&limit=6`); const d = await r.json(); render(d.results || []); } catch { hide(); } }, 250);
+      input.addEventListener("input", (e) => { const q = e.target.value.trim(); if (q.length < 2) { hide(); return; } fetchGeo(q); });
       input.addEventListener("keydown", (e) => {
-        if (e.key === "ArrowDown" && items.length) {
-          e.preventDefault(); active = Math.min(active + 1, items.length - 1); paint();
-        } else if (e.key === "ArrowUp" && items.length) {
-          e.preventDefault(); active = Math.max(active - 1, 0); paint();
-        } else if (e.key === "Enter") {
+        if (e.key === "ArrowDown" && items.length) { e.preventDefault(); active = Math.min(active + 1, items.length - 1); paint(); }
+        else if (e.key === "ArrowUp" && items.length) { e.preventDefault(); active = Math.max(active - 1, 0); paint(); }
+        else if (e.key === "Enter") {
           e.preventDefault();
           const raw = e.target.value.trim();
           const m = raw.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
@@ -280,131 +246,115 @@
           else if (m) { onPick({ label: raw, lat: parseFloat(m[1]), lon: parseFloat(m[2]) }); input.value = ""; hide(); }
         } else if (e.key === "Escape") { hide(); }
       });
-
       input.addEventListener("blur", () => setTimeout(hide, 150));
     }
 
-    // ── Live forecast ────────────────────────────────────────────────────
-    // Map NWS shortForecast text -> a weather emoji (self-contained; no external
-    // icon assets to hotlink).
-    function wxEmoji(short, isDay) {
-      const s = (short || "").toLowerCase();
-      if (s.includes("thunder") || s.includes("storm")) return "⛈️";
-      if (s.includes("snow") || s.includes("flurr") || s.includes("sleet") || s.includes("ice")) return "❄️";
-      if (s.includes("rain") || s.includes("shower") || s.includes("drizzle")) return "🌧️";
-      if (s.includes("fog") || s.includes("haze")) return "🌫️";
-      if (s.includes("cloud")) return isDay ? "⛅" : "☁️";
-      if (s.includes("clear") || s.includes("sunny")) return isDay ? "☀️" : "🌙";
-      return isDay ? "🌤️" : "🌙";
-    }
-
-    async function loadForecast(loc) {
-      const status = $("fcStatus"), out = $("fcResults");
-      status.textContent = `Loading forecast for ${loc.label}…`; out.innerHTML = "";
+    // ── Live conditions panel (Open-Meteo: yesterday/today/tomorrow + AQI) ────
+    async function loadConditions(loc) {
+      const title = $("condTitle"), body = $("condBody");
+      title.textContent = `Conditions · ${loc.label}`;
+      body.innerHTML = '<p class="hint">Loading…</p>';
       try {
-        const resp = await fetch(`/weather/forecast?location=${encodeURIComponent(loc.lat + "," + loc.lon)}`);
+        const resp = await fetch(`/weather/conditions?location=${encodeURIComponent(loc.lat + "," + loc.lon)}`);
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-        status.textContent = `Forecast for ${data.location}`;
-        for (const p of data.periods) {
-          const card = document.createElement("div");
-          card.className = "fc-card";
-          card.title = p.detailed_forecast || "";        // full narrative on hover
-          const emoji = document.createElement("div");
-          emoji.className = "fc-emoji"; emoji.textContent = wxEmoji(p.short_forecast, p.is_daytime);
-          const name = document.createElement("div");
-          name.className = "fc-name"; name.textContent = p.name || "";
-          const temp = document.createElement("div");
-          temp.className = "fc-temp";
-          temp.textContent = p.temperature != null ? `${p.temperature}°${p.temperature_unit || ""}` : "";
-          const short = document.createElement("div");
-          short.className = "fc-short"; short.textContent = p.short_forecast || "";
-          card.append(emoji, name, temp, short);
-          out.append(card);
+        body.innerHTML = "";
+        const days = document.createElement("div"); days.className = "cond-days";
+        for (const d of data.days) {
+          const c = document.createElement("div"); c.className = "cond-card";
+          const em = document.createElement("div"); em.className = "cond-emoji"; em.textContent = d.emoji || "🌡️";
+          const lb = document.createElement("div"); lb.className = "cond-label"; lb.textContent = d.label || "";
+          const tp = document.createElement("div"); tp.className = "cond-temp";
+          const hi = d.temp_max != null ? Math.round(d.temp_max) + "°" : "—";
+          const lo = d.temp_min != null ? Math.round(d.temp_min) + "°" : "—";
+          tp.textContent = `${hi} / ${lo}`;
+          const ds = document.createElement("div"); ds.className = "cond-desc"; ds.textContent = d.description || "";
+          const pp = document.createElement("div"); pp.className = "cond-precip"; pp.textContent = d.precip_prob != null ? `💧 ${d.precip_prob}%` : "";
+          c.append(em, lb, tp, ds, pp); days.append(c);
         }
-        if (!data.periods.length) out.innerHTML = '<p class="hint">No forecast returned for this location.</p>';
-      } catch (e) {
-        status.textContent = "⚠️ " + e.message; out.innerHTML = "";
-      }
+        body.append(days);
+        const aq = data.air_quality || {};
+        const badge = document.createElement("div"); badge.className = "aqi"; badge.style.borderColor = aq.color || "var(--line)";
+        const dot = document.createElement("span"); dot.className = "aqi-dot"; dot.style.background = aq.color || "var(--muted)";
+        const txt = document.createElement("span");
+        txt.textContent = aq.us_aqi != null ? `Air quality ${aq.us_aqi} · ${aq.category}` : "Air quality: n/a";
+        if (aq.pm2_5 != null) badge.title = `PM2.5 ${aq.pm2_5} · PM10 ${aq.pm10} · Ozone ${aq.ozone}`;
+        badge.append(dot, txt); body.append(badge);
+      } catch (e) { body.innerHTML = `<p class="hint">⚠️ ${e.message}</p>`; }
     }
 
-    attachAutocomplete($("fcInput"), $("fcSuggest"), loadForecast);
-
-    // ── Sync: location chips ─────────────────────────────────────────────
-    const selected = [];   // {label, lat, lon}
-
+    // ── Sync target chips ────────────────────────────────────────────────
+    const selected = [];
     function renderChips() {
-      const box = $("locChips");
-      box.innerHTML = "";
+      const box = $("locChips"); box.innerHTML = "";
+      if (!selected.length) { box.innerHTML = '<span class="hint">No cities queued yet — search one above.</span>'; return; }
       selected.forEach((loc, i) => {
-        const chip = document.createElement("span");
-        chip.className = "chip";
-        chip.append(loc.label);                    // textContent — safe
-        const x = document.createElement("button");
-        x.type = "button"; x.textContent = "✕"; x.title = "Remove";
+        const chip = document.createElement("span"); chip.className = "chip"; chip.append(loc.label);
+        const x = document.createElement("button"); x.type = "button"; x.textContent = "✕"; x.title = "Remove";
         x.addEventListener("click", () => { selected.splice(i, 1); renderChips(); });
-        chip.append(x);
-        box.append(chip);
+        chip.append(x); box.append(chip);
       });
     }
-
     function addChip(r) {
-      const loc = { label: r.label, lat: r.lat, lon: r.lon };
-      if (!selected.some(s => s.lat === loc.lat && s.lon === loc.lon)) {
-        selected.push(loc); renderChips();
-      }
+      if (!selected.some(s => s.lat === r.lat && s.lon === r.lon)) { selected.push({ label: r.label, lat: r.lat, lon: r.lon }); renderChips(); }
     }
+    renderChips();
 
-    attachAutocomplete($("locInput"), $("locSuggest"), addChip);
+    // A pick from the shared input does both: queue for sync + show conditions.
+    function onLocationPick(r) { addChip(r); loadConditions(r); }
+    attachAutocomplete($("locInput"), $("locSuggest"), onLocationPick);
 
     $("syncBtn").addEventListener("click", async () => {
       const btn = $("syncBtn"), status = $("syncStatus");
-      if (!selected.length) { status.textContent = "Add at least one city first."; return; }
+      if (!selected.length) { status.textContent = "Search and pick at least one city first."; return; }
       btn.disabled = true; status.textContent = "Harvesting from api.weather.gov…";
       try {
-        const data = await postJSON("/weather/sync", {
-          locations: selected.map(l => `${l.lat},${l.lon}`),
-          limit: Number($("limit").value),
-        });
+        const data = await postJSON("/weather/sync", { locations: selected.map(l => `${l.lat},${l.lon}`), limit: Number($("limit").value) });
         let msg = `✅ Synced ${data.synced} documents for ${data.locations.join(", ")}.`;
         if (data.skipped?.length) msg += ` Skipped: ${data.skipped.map(s => s.location).join(", ")}.`;
         status.textContent = msg;
-      } catch (e) {
-        status.textContent = "⚠️ " + e.message;
-      } finally { btn.disabled = false; }
+      } catch (e) { status.textContent = "⚠️ " + e.message; } finally { btn.disabled = false; }
     });
 
     // ── Search ───────────────────────────────────────────────────────────
+    // Cosine similarity on short weather text realistically lands ~0.1–0.6, so
+    // we bucket it into honest qualitative labels rather than a fake percentage.
+    function matchBadge(sim) {
+      if (sim >= 0.5) return ["Strong match", "#34d399"];
+      if (sim >= 0.35) return ["Moderate match", "#fbbf24"];
+      if (sim >= 0.2) return ["Weak match", "#fb923c"];
+      return ["Faint match", "#94a3b8"];
+    }
+    function fmtWhen(r) {
+      const fmt = (iso) => { try { return new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric" }); } catch { return null; } };
+      if (r.expires_at) { const e = fmt(r.expires_at); if (e) return `Active through ${e}`; }
+      if (r.effective_at) { const s = fmt(r.effective_at); if (s) return `Starts ${s}`; }
+      return "";
+    }
+
     $("searchBtn").addEventListener("click", async () => {
-      const btn = $("searchBtn"), status = $("searchStatus"), results = $("results");
-      btn.disabled = true; status.textContent = "Embedding query & searching…"; results.innerHTML = "";
+      const btn = $("searchBtn"), status = $("searchStatus"), results = $("results"), caption = $("resultsCaption");
+      btn.disabled = true; status.textContent = "Embedding query & searching…"; results.innerHTML = ""; caption.hidden = true;
       try {
         const data = await postJSON("/weather/search", {
-          query: $("query").value,
-          top_k: Number($("topk").value),
-          search_mode: $("mode").value,
-          source_type: $("source").value || null,
+          query: $("query").value, top_k: Number($("topk").value),
+          search_mode: $("mode").value, source_type: $("source").value || null,
         });
         status.textContent = `${data.count} result(s) for "${data.query}".`;
+        caption.hidden = data.count === 0;
         for (const r of data.results) {
-          const card = document.createElement("div");
-          card.className = "card";
-          const snippet = r.chunk_text || r.narrative_text || "";
-          card.innerHTML = `
-            <div class="top">
-              <span class="loc"></span>
-              <span class="sim">${(r.similarity ?? 0).toFixed(3)}</span>
-            </div>
-            <div class="snippet"></div>`;
-          card.querySelector(".loc").textContent =
-            `${r.location ?? "—"} · ${r.headline ?? ""} ${r.source_type ? "(" + r.source_type + ")" : ""}`;
-          card.querySelector(".snippet").textContent = snippet.slice(0, 400);
+          const sim = r.similarity ?? 0;
+          const [label, color] = matchBadge(sim);
+          const card = document.createElement("div"); card.className = "card";
+          card.innerHTML = `<div class="top"><span class="loc"></span><span class="badge" title="cosine ${sim.toFixed(3)}"></span></div><div class="when"></div><div class="snippet"></div>`;
+          card.querySelector(".loc").textContent = `${r.location ?? "—"} · ${r.headline ?? ""} ${r.source_type ? "(" + r.source_type + ")" : ""}`;
+          const b = card.querySelector(".badge"); b.textContent = label; b.style.background = color;
+          card.querySelector(".when").textContent = fmtWhen(r);
+          card.querySelector(".snippet").textContent = (r.chunk_text || r.narrative_text || "").slice(0, 400);
           results.appendChild(card);
         }
         if (!data.results.length) results.innerHTML = '<p class="hint">No matches — sync some cities and run the embed notebook first.</p>';
-      } catch (e) {
-        status.textContent = "⚠️ " + e.message;
-      } finally { btn.disabled = false; }
+      } catch (e) { status.textContent = "⚠️ " + e.message; } finally { btn.disabled = false; }
     });
   </script>
 </body>
