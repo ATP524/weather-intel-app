@@ -204,21 +204,26 @@ def daily_weather(lat: float, lon: float) -> list[dict]:
     return out
 
 
-def _aqi_category(aqi: float | None) -> tuple[str, str]:
-    """Map a US AQI value to its EPA category name + a display color."""
+def _aqi_category(aqi: float | None) -> tuple[str, str, str, str]:
+    """Map a US AQI value to (EPA category, dot color, soft pill bg, text color).
+
+    Colors are muted/desaturated to sit inside the app's scandi palette and stay
+    consistent with the search match-strength pills, while still reading as the
+    familiar green→maroon EPA scale.
+    """
     if aqi is None:
-        return ("Unknown", "#94a3b8")
+        return ("Unknown", "#A9ABA2", "#E9EAE4", "#5B5E56")
     if aqi <= 50:
-        return ("Good", "#34d399")
+        return ("Good", "#6BA173", "#E2EDE3", "#3F6E48")
     if aqi <= 100:
-        return ("Moderate", "#fbbf24")
+        return ("Moderate", "#C39A2E", "#F3EBD4", "#7C610F")
     if aqi <= 150:
-        return ("Unhealthy for sensitive groups", "#fb923c")
+        return ("Unhealthy for sensitive groups", "#C77A4A", "#F1E4DA", "#8C4F2E")
     if aqi <= 200:
-        return ("Unhealthy", "#f87171")
+        return ("Unhealthy", "#C56A62", "#F1DEDC", "#8E433D")
     if aqi <= 300:
-        return ("Very unhealthy", "#c084fc")
-    return ("Hazardous", "#9f1239")
+        return ("Very unhealthy", "#9A7CC0", "#E9E1EF", "#5F4680")
+    return ("Hazardous", "#A85450", "#ECDCDC", "#7A2E2A")
 
 
 def air_quality(lat: float, lon: float) -> dict:
@@ -240,11 +245,13 @@ def air_quality(lat: float, lon: float) -> dict:
     resp.raise_for_status()
     cur = resp.json().get("current", {})
     aqi = cur.get("us_aqi")
-    category, color = _aqi_category(aqi)
+    category, dot, bg, text = _aqi_category(aqi)
     return {
         "us_aqi": aqi,
         "category": category,
-        "color": color,
+        "dot": dot,   # colored status dot
+        "bg": bg,     # soft pill background
+        "text": text, # pill text color
         "pm2_5": cur.get("pm2_5"),
         "pm10": cur.get("pm10"),
         "ozone": cur.get("ozone"),
