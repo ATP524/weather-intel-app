@@ -20,7 +20,7 @@ from databricks.sdk.service import workspace
 
 w = WorkspaceClient()
 
-SCOPE = "database-day1"  # matches LAKEBASE_SECRET_SCOPE in app.yaml / .env
+SCOPE = "database-day2"  # matches LAKEBASE_SECRET_SCOPE in app.yaml / .env
 
 # create_scope raises if the scope already exists; ignore that so re-runs are safe.
 try:
