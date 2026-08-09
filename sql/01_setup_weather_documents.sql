@@ -11,7 +11,7 @@
 --
 -- Schema design notes:
 --   * All app tables live in a dedicated `weather` schema (mirrors how the
---     day-1/day-2 app isolated everything under `stock_ticker`). lakebase.py
+--     day-1/day-2 app isolated everything under `weather`). lakebase.py
 --     sets search_path to `weather, public`, so the Flask app sees these
 --     tables unqualified.
 --   * `source_type` discriminates the two harvest sources so /weather/search
@@ -55,3 +55,39 @@ CREATE INDEX IF NOT EXISTS idx_weather_documents_location
 --
 -- After /weather/sync runs, sanity-check the harvest:
 -- SELECT source_type, COUNT(*) FROM weather_documents GROUP BY source_type;
+
+
+
+-- ---------------------------------------------------------------------------
+-- Permissions: lakebase being set to current_user email vs. app student 
+-- reconciliation to avoid permission issues
+-- ---------------------------------------------------------------------------
+-- ALTER TABLE weather_documents REPLICA IDENTITY FULL;
+
+-- cannot touch any object without schema usage
+GRANT USAGE ON SCHEMA weather TO student;
+
+-- the DML the app requires to sync/search
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES    IN SCHEMA weather TO student;
+
+-- this particular app has no sequences (all PKs are TEXT, no SERIAL) harmless to run 
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA weather TO student;
+
+-- future-proof applies to tables the 'running' roles creates later
+ALTER DEFAULT PRIVILEGES IN SCHEMA weather
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO student;
+
+-- similar to usage, no harm to run
+ALTER DEFAULT PRIVILEGES IN SCHEMA weather
+  GRANT USAGE, SELECT ON SEQUENCES TO student;
+
+
+-- ---------------------------------------------------------------------------
+-- If needed: run these in lakebase to add new columns
+-- ---------------------------------------------------------------------------
+
+-- ALTER TABLE weather.weather_documents ADD COLUMN IF NOT EXISTS X NUMERIC;
+-- ALTER TABLE weather.weather_documents ADD COLUMN IF NOT EXISTS X NUMERIC;
+-- ALTER TABLE weather.weather_documents ADD COLUMN IF NOT EXISTS X NUMERIC;
+-- ALTER TABLE weather.weather_documents ADD COLUMN IF NOT EXISTS X TEXT;
+-- ALTER TABLE weather.weather_documents ADD COLUMN IF NOT EXISTS X TEXT;
