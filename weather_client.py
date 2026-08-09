@@ -292,6 +292,38 @@ class WeatherClient:
                 "payload": period,
             }
 
+    def get_forecast_periods(
+        self, office: str, grid_x: int, grid_y: int
+    ) -> list[dict]:
+        """
+        Return the multi-day forecast as display-ready period dicts for the UI's
+        live Forecast view — temperature, wind, and short/detailed text.
+
+        This is the presentation-oriented sibling of get_forecast(): that method
+        yields embedding documents (headline + narrative only) for /weather/sync,
+        whereas this returns the richer fields a human wants to see, straight
+        from NWS with no Lakebase involved.
+        """
+        data = self.get(f"/gridpoints/{office}/{grid_x},{grid_y}/forecast")
+        periods = []
+        for p in data.get("properties", {}).get("periods", []):
+            wind = " ".join(
+                part for part in (p.get("windSpeed"), p.get("windDirection")) if part
+            )
+            periods.append(
+                {
+                    "name": p.get("name"),
+                    "start_time": p.get("startTime"),
+                    "is_daytime": p.get("isDaytime"),
+                    "temperature": p.get("temperature"),
+                    "temperature_unit": p.get("temperatureUnit"),
+                    "wind": wind,
+                    "short_forecast": p.get("shortForecast"),
+                    "detailed_forecast": p.get("detailedForecast"),
+                }
+            )
+        return periods
+
 
 def _forecast_id(location_label: str, start_time: str | None) -> str:
     """Stable dedup key for a forecast period: sha256(location|start_time).

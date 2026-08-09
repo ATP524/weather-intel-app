@@ -17,16 +17,18 @@
       margin: 0; font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
       background: var(--bg); color: var(--text);
     }
+    a { color: var(--accent); }
     header { padding: 28px 20px 10px; max-width: 860px; margin: 0 auto; }
     h1 { margin: 0 0 4px; font-size: 22px; }
     .sub { color: var(--muted); margin: 0; }
-    main { max-width: 860px; margin: 0 auto; padding: 12px 20px 60px; }
+    main { max-width: 860px; margin: 0 auto; padding: 12px 20px 20px; }
     section {
       background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
       padding: 18px; margin-top: 18px;
     }
-    h2 { margin: 0 0 12px; font-size: 15px; text-transform: uppercase;
+    h2 { margin: 0 0 4px; font-size: 15px; text-transform: uppercase;
          letter-spacing: .04em; color: var(--muted); }
+    .desc { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
     label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
     input, select, textarea {
       width: 100%; padding: 9px 11px; background: #0b1220; color: var(--text);
@@ -37,7 +39,7 @@
     button {
       margin-top: 14px; padding: 9px 16px; border: 0; border-radius: 8px;
       background: var(--accent); color: var(--accent-ink); font-weight: 600;
-      cursor: pointer;
+      cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
     }
     button:disabled { opacity: .55; cursor: default; }
     .status { margin-top: 10px; font-size: 13px; color: var(--muted); min-height: 18px; }
@@ -48,11 +50,6 @@
     .card .top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
     .loc { font-weight: 600; }
     .sim { color: var(--good); font-variant-numeric: tabular-nums; font-size: 13px; }
-    .tag {
-      display: inline-block; font-size: 11px; text-transform: uppercase;
-      letter-spacing: .05em; padding: 1px 7px; border-radius: 999px;
-      border: 1px solid var(--line); color: var(--muted); margin-left: 8px;
-    }
     .snippet { color: var(--text); margin-top: 6px; font-size: 14px; }
     .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
 
@@ -78,73 +75,133 @@
       line-height: 1; padding: 0 3px; margin: 0;
     }
     .chip button:hover { color: var(--text); }
+
+    /* --- Live forecast cards --- */
+    .fc-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+      gap: 10px; margin-top: 12px;
+    }
+    .fc-card {
+      background: #0b1220; border: 1px solid var(--line); border-radius: 10px;
+      padding: 12px 10px; text-align: center;
+    }
+    .fc-emoji { font-size: 26px; line-height: 1; }
+    .fc-name { font-size: 12px; color: var(--muted); margin-top: 6px; min-height: 2.6em; }
+    .fc-temp { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+    .fc-short { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    /* --- Advanced settings disclosure --- */
+    details.adv { margin-top: 12px; }
+    details.adv > summary {
+      cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; user-select: none;
+    }
+    details.adv > summary::-webkit-details-marker { display: none; }
+    details.adv > summary::before { content: "▸ "; }
+    details.adv[open] > summary::before { content: "▾ "; }
+
+    footer {
+      max-width: 860px; margin: 0 auto; padding: 8px 20px 44px;
+      color: var(--muted); font-size: 12px;
+    }
   </style>
 </head>
 <body>
   <header>
     <h1>🌦️ Weather Intelligence</h1>
-    <p class="sub">Semantic search over NWS alerts &amp; forecasts, powered by Lakebase + pgvector.</p>
+    <p class="sub">Live forecasts and semantic search over NWS alerts &amp; forecasts, powered by Lakebase + pgvector.</p>
   </header>
 
   <main>
-    <!-- ── Harvest ─────────────────────────────────────────────────────── -->
+    <!-- ── Live forecast (casual entry point — reads live, no setup) ──────── -->
     <section>
-      <h2>1 · Harvest</h2>
-      <label for="locInput">Locations — search any US city</label>
+      <h2>Live forecast</h2>
+      <p class="desc">Type any US city to see its multi-day forecast, straight from the National Weather Service.</p>
+      <div class="combo">
+        <input id="fcInput" autocomplete="off" placeholder="Search a city… e.g. Milwaukee, Denver, Miami" />
+        <div id="fcSuggest" class="suggest" hidden></div>
+      </div>
+      <div id="fcStatus" class="status"></div>
+      <div id="fcResults" class="fc-grid"></div>
+    </section>
+
+    <!-- ── Semantic search ───────────────────────────────────────────────── -->
+    <section>
+      <h2>Search</h2>
+      <p class="desc">Ask in plain language; results are ranked by meaning across synced alerts &amp; forecasts.</p>
+      <label for="query">Your question</label>
+      <input id="query" value="flash flood risk this weekend"
+             placeholder="e.g. excessive heat warning" />
+
+      <details class="adv">
+        <summary>Advanced settings</summary>
+        <div class="row">
+          <div>
+            <label for="mode">Search mode</label>
+            <select id="mode">
+              <option value="chunk">chunk (passage-level)</option>
+              <option value="document">document (whole-doc)</option>
+            </select>
+          </div>
+          <div>
+            <label for="source">Source filter</label>
+            <select id="source">
+              <option value="">any</option>
+              <option value="alert">alert</option>
+              <option value="forecast">forecast</option>
+            </select>
+          </div>
+          <div>
+            <label for="topk">Top K (1–20)</label>
+            <input id="topk" type="number" value="5" min="1" max="20" />
+          </div>
+        </div>
+      </details>
+
+      <button id="searchBtn">Search</button>
+      <div id="searchStatus" class="status"></div>
+      <div id="results"></div>
+    </section>
+
+    <!-- ── Sync (ingestion / admin) ──────────────────────────────────────── -->
+    <section>
+      <h2>Sync from NWS</h2>
+      <p class="desc">
+        <strong>NWS</strong> is the U.S. <a href="https://www.weather.gov" target="_blank" rel="noopener">National
+        Weather Service</a> (weather.gov). This harvests live alerts &amp; multi-day forecasts for the chosen cities
+        into Lakebase, so the search above has data to work with.
+      </p>
+      <label for="locInput">Cities to harvest</label>
       <div class="combo">
         <input id="locInput" autocomplete="off"
                placeholder="Start typing… e.g. Milwaukee, New York, Denver" />
         <div id="locSuggest" class="suggest" hidden></div>
       </div>
       <div id="locChips" class="chips"></div>
-      <p class="hint">Type a city and pick a match (↑/↓ + Enter works too), or paste a "lat,lon" pair. Add as many as you like.</p>
+      <p class="hint">Pick a match (↑/↓ + Enter works), or paste a "lat,lon" pair. Add as many as you like.</p>
       <div class="row">
         <div>
-          <label for="limit">Max docs per location</label>
-          <input id="limit" type="number" value="50" min="1" max="500" />
+          <label for="limit">Max docs per city</label>
+          <input id="limit" type="number" value="20" min="1" max="500" />
         </div>
       </div>
-      <button id="syncBtn">Sync from NWS</button>
+      <button id="syncBtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6 9.5 3.5 3.5 0 0 0 7 18z" fill="currentColor"/>
+        </svg>
+        Sync from NWS
+      </button>
       <div id="syncStatus" class="status"></div>
     </section>
-
-    <!-- ── Retrieve ────────────────────────────────────────────────────── -->
-    <section>
-      <h2>2 · Search</h2>
-      <label for="query">Natural-language query</label>
-      <input id="query" value="flash flood risk this weekend"
-             placeholder="e.g. excessive heat warning" />
-      <div class="row">
-        <div>
-          <label for="mode">Search mode</label>
-          <select id="mode">
-            <option value="chunk">chunk (passage-level)</option>
-            <option value="document">document (whole-doc)</option>
-          </select>
-        </div>
-        <div>
-          <label for="source">Source filter</label>
-          <select id="source">
-            <option value="">any</option>
-            <option value="alert">alert</option>
-            <option value="forecast">forecast</option>
-          </select>
-        </div>
-        <div>
-          <label for="topk">Top K (1–20)</label>
-          <input id="topk" type="number" value="5" min="1" max="20" />
-        </div>
-      </div>
-      <button id="searchBtn">Search</button>
-      <div id="searchStatus" class="status"></div>
-      <div id="results"></div>
-    </section>
   </main>
+
+  <footer>
+    Weather data courtesy of the U.S. <a href="https://www.weather.gov" target="_blank" rel="noopener">National
+    Weather Service</a> (weather.gov). This project is independent and not affiliated with or endorsed by NOAA/NWS.
+  </footer>
 
   <script>
     const $ = id => document.getElementById(id);
 
-    // Tiny helper: POST JSON and parse JSON, surfacing API errors uniformly.
     async function postJSON(path, body) {
       const resp = await fetch(path, {
         method: "POST",
@@ -161,12 +218,120 @@
       return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
     };
 
-    // ── Location autocomplete + chips ────────────────────────────────────
-    // selected: the chosen locations, each {label, lat, lon}. We send their
-    // coordinates to /weather/sync, so the backend never has to re-geocode.
-    const selected = [];
-    let suggestions = [];   // current dropdown candidates
-    let activeIdx = -1;     // keyboard-highlighted candidate
+    // ── Reusable city autocomplete ───────────────────────────────────────
+    // Binds an <input> + suggestion <div> to /weather/geocode; calls onPick(r)
+    // with {label, lat, lon, state} when a candidate is chosen (click, Enter,
+    // or a pasted "lat,lon"). Used by both the forecast and sync inputs.
+    function attachAutocomplete(input, suggest, onPick) {
+      let items = [], active = -1;
+
+      const hide = () => { items = []; active = -1; suggest.hidden = true; suggest.innerHTML = ""; };
+      const paint = () => suggest.querySelectorAll(".opt")
+        .forEach((o, i) => o.classList.toggle("active", i === active));
+
+      const render = (list) => {
+        items = list; active = -1; suggest.innerHTML = "";
+        if (!list.length) {
+          const e = document.createElement("div");
+          e.className = "empty"; e.textContent = "No US matches";
+          suggest.append(e); suggest.hidden = false; return;
+        }
+        list.forEach((r) => {
+          const opt = document.createElement("div");
+          opt.className = "opt";
+          const city = document.createElement("span");
+          city.textContent = (r.label || "").split(",")[0];   // textContent — no HTML injection
+          const st = document.createElement("span");
+          st.className = "st"; st.textContent = r.state || "";
+          opt.append(city, st);
+          opt.addEventListener("mousedown", (e) => {   // mousedown beats input blur
+            e.preventDefault(); onPick(r); input.value = ""; hide();
+          });
+          suggest.append(opt);
+        });
+        suggest.hidden = false;
+      };
+
+      const fetchGeo = debounce(async (q) => {
+        try {
+          const resp = await fetch(`/weather/geocode?q=${encodeURIComponent(q)}&limit=6`);
+          const data = await resp.json();
+          render(data.results || []);
+        } catch { hide(); }
+      }, 250);
+
+      input.addEventListener("input", (e) => {
+        const q = e.target.value.trim();
+        if (q.length < 2) { hide(); return; }
+        fetchGeo(q);
+      });
+
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowDown" && items.length) {
+          e.preventDefault(); active = Math.min(active + 1, items.length - 1); paint();
+        } else if (e.key === "ArrowUp" && items.length) {
+          e.preventDefault(); active = Math.max(active - 1, 0); paint();
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          const raw = e.target.value.trim();
+          const m = raw.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+          if (active >= 0 && items[active]) { onPick(items[active]); input.value = ""; hide(); }
+          else if (items.length) { onPick(items[0]); input.value = ""; hide(); }
+          else if (m) { onPick({ label: raw, lat: parseFloat(m[1]), lon: parseFloat(m[2]) }); input.value = ""; hide(); }
+        } else if (e.key === "Escape") { hide(); }
+      });
+
+      input.addEventListener("blur", () => setTimeout(hide, 150));
+    }
+
+    // ── Live forecast ────────────────────────────────────────────────────
+    // Map NWS shortForecast text -> a weather emoji (self-contained; no external
+    // icon assets to hotlink).
+    function wxEmoji(short, isDay) {
+      const s = (short || "").toLowerCase();
+      if (s.includes("thunder") || s.includes("storm")) return "⛈️";
+      if (s.includes("snow") || s.includes("flurr") || s.includes("sleet") || s.includes("ice")) return "❄️";
+      if (s.includes("rain") || s.includes("shower") || s.includes("drizzle")) return "🌧️";
+      if (s.includes("fog") || s.includes("haze")) return "🌫️";
+      if (s.includes("cloud")) return isDay ? "⛅" : "☁️";
+      if (s.includes("clear") || s.includes("sunny")) return isDay ? "☀️" : "🌙";
+      return isDay ? "🌤️" : "🌙";
+    }
+
+    async function loadForecast(loc) {
+      const status = $("fcStatus"), out = $("fcResults");
+      status.textContent = `Loading forecast for ${loc.label}…`; out.innerHTML = "";
+      try {
+        const resp = await fetch(`/weather/forecast?location=${encodeURIComponent(loc.lat + "," + loc.lon)}`);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        status.textContent = `Forecast for ${data.location}`;
+        for (const p of data.periods) {
+          const card = document.createElement("div");
+          card.className = "fc-card";
+          card.title = p.detailed_forecast || "";        // full narrative on hover
+          const emoji = document.createElement("div");
+          emoji.className = "fc-emoji"; emoji.textContent = wxEmoji(p.short_forecast, p.is_daytime);
+          const name = document.createElement("div");
+          name.className = "fc-name"; name.textContent = p.name || "";
+          const temp = document.createElement("div");
+          temp.className = "fc-temp";
+          temp.textContent = p.temperature != null ? `${p.temperature}°${p.temperature_unit || ""}` : "";
+          const short = document.createElement("div");
+          short.className = "fc-short"; short.textContent = p.short_forecast || "";
+          card.append(emoji, name, temp, short);
+          out.append(card);
+        }
+        if (!data.periods.length) out.innerHTML = '<p class="hint">No forecast returned for this location.</p>';
+      } catch (e) {
+        status.textContent = "⚠️ " + e.message; out.innerHTML = "";
+      }
+    }
+
+    attachAutocomplete($("fcInput"), $("fcSuggest"), loadForecast);
+
+    // ── Sync: location chips ─────────────────────────────────────────────
+    const selected = [];   // {label, lat, lon}
 
     function renderChips() {
       const box = $("locChips");
@@ -174,7 +339,7 @@
       selected.forEach((loc, i) => {
         const chip = document.createElement("span");
         chip.className = "chip";
-        chip.append(loc.label);                    // textContent — safe from injection
+        chip.append(loc.label);                    // textContent — safe
         const x = document.createElement("button");
         x.type = "button"; x.textContent = "✕"; x.title = "Remove";
         x.addEventListener("click", () => { selected.splice(i, 1); renderChips(); });
@@ -183,95 +348,18 @@
       });
     }
 
-    function addLocation(loc) {
-      // De-dupe on coordinates so the same place can't be added twice.
+    function addChip(r) {
+      const loc = { label: r.label, lat: r.lat, lon: r.lon };
       if (!selected.some(s => s.lat === loc.lat && s.lon === loc.lon)) {
-        selected.push(loc);
-        renderChips();
+        selected.push(loc); renderChips();
       }
-      $("locInput").value = "";
-      hideSuggest();
     }
 
-    function hideSuggest() {
-      suggestions = []; activeIdx = -1;
-      const el = $("locSuggest"); el.hidden = true; el.innerHTML = "";
-    }
+    attachAutocomplete($("locInput"), $("locSuggest"), addChip);
 
-    function paintActive() {
-      $("locSuggest").querySelectorAll(".opt")
-        .forEach((o, i) => o.classList.toggle("active", i === activeIdx));
-    }
-
-    function renderSuggest(list) {
-      suggestions = list; activeIdx = -1;
-      const el = $("locSuggest");
-      el.innerHTML = "";
-      if (!list.length) {
-        const empty = document.createElement("div");
-        empty.className = "empty"; empty.textContent = "No US matches";
-        el.append(empty); el.hidden = false; return;
-      }
-      list.forEach((r, i) => {
-        const opt = document.createElement("div");
-        opt.className = "opt"; opt.dataset.i = i;
-        const city = document.createElement("span");
-        city.textContent = (r.label || "").split(",")[0];   // textContent — no HTML injection
-        const st = document.createElement("span");
-        st.className = "st"; st.textContent = r.state || "";
-        opt.append(city, st);
-        // mousedown (not click) fires before the input's blur, so the pick lands.
-        opt.addEventListener("mousedown", (e) => {
-          e.preventDefault();
-          addLocation({ label: r.label, lat: r.lat, lon: r.lon });
-        });
-        el.append(opt);
-      });
-      el.hidden = false;
-    }
-
-    const doGeocode = debounce(async (q) => {
-      try {
-        const resp = await fetch(`/weather/geocode?q=${encodeURIComponent(q)}&limit=6`);
-        const data = await resp.json();
-        renderSuggest(data.results || []);
-      } catch { hideSuggest(); }
-    }, 250);
-
-    $("locInput").addEventListener("input", (e) => {
-      const q = e.target.value.trim();
-      if (q.length < 2) { hideSuggest(); return; }
-      doGeocode(q);
-    });
-
-    $("locInput").addEventListener("keydown", (e) => {
-      if (e.key === "ArrowDown" && suggestions.length) {
-        e.preventDefault(); activeIdx = Math.min(activeIdx + 1, suggestions.length - 1); paintActive();
-      } else if (e.key === "ArrowUp" && suggestions.length) {
-        e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); paintActive();
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        const raw = e.target.value.trim();
-        const m = raw.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
-        if (activeIdx >= 0 && suggestions[activeIdx]) {
-          addLocation(suggestions[activeIdx]);          // highlighted pick
-        } else if (suggestions.length) {
-          addLocation(suggestions[0]);                  // top match
-        } else if (m) {
-          addLocation({ label: raw, lat: parseFloat(m[1]), lon: parseFloat(m[2]) });  // raw lat,lon
-        }
-      } else if (e.key === "Escape") {
-        hideSuggest();
-      }
-    });
-
-    // Close the dropdown on blur, but after any pending mousedown pick.
-    $("locInput").addEventListener("blur", () => setTimeout(hideSuggest, 150));
-
-    // ── Sync ─────────────────────────────────────────────────────────────
     $("syncBtn").addEventListener("click", async () => {
       const btn = $("syncBtn"), status = $("syncStatus");
-      if (!selected.length) { status.textContent = "Add at least one location first."; return; }
+      if (!selected.length) { status.textContent = "Add at least one city first."; return; }
       btn.disabled = true; status.textContent = "Harvesting from api.weather.gov…";
       try {
         const data = await postJSON("/weather/sync", {
@@ -308,13 +396,12 @@
               <span class="sim">${(r.similarity ?? 0).toFixed(3)}</span>
             </div>
             <div class="snippet"></div>`;
-          // Fill text via textContent to avoid injecting raw API text as HTML.
           card.querySelector(".loc").textContent =
             `${r.location ?? "—"} · ${r.headline ?? ""} ${r.source_type ? "(" + r.source_type + ")" : ""}`;
           card.querySelector(".snippet").textContent = snippet.slice(0, 400);
           results.appendChild(card);
         }
-        if (!data.results.length) results.innerHTML = '<p class="hint">No matches — has the embed step run?</p>';
+        if (!data.results.length) results.innerHTML = '<p class="hint">No matches — sync some cities and run the embed notebook first.</p>';
       } catch (e) {
         status.textContent = "⚠️ " + e.message;
       } finally { btn.disabled = false; }

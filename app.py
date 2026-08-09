@@ -177,7 +177,7 @@ def sync_weather():
 
     body = request.json if request.is_json else {}
     locations = body.get("locations") or DEFAULT_LOCATIONS
-    limit = _coerce_int(body.get("limit"), default=50, low=1, high=500)
+    limit = _coerce_int(body.get("limit"), default=20, low=1, high=500)
 
     total = 0
     synced_locations = []
@@ -292,6 +292,39 @@ def geocode_locations():
         logger.warning("Geocoding failed for %r: %s", q, exc)
         return jsonify({"error": f"Geocoding failed: {exc}"}), 502
     return jsonify({"query": q, "results": results})
+
+
+# ===========================================================================
+# Live forecast (UI view):  GET /weather/forecast
+# ===========================================================================
+@app.route("/weather/forecast", methods=["GET"])
+def weather_forecast():
+    """
+    Live multi-day forecast for a single location, powering the UI's Forecast
+    view. Resolves the location to an NWS grid and returns the forecast periods
+    straight from NWS — it reads live and does NOT touch Lakebase, so it works
+    even before anything has been synced or embedded.
+
+    Query param: location — a US city name or "lat,lon".
+    Returns: {"location": label, "periods": [{name, temperature, ...}, ...]}
+    """
+    location = request.args.get("location", "").strip()
+    if not location:
+        return jsonify({"error": "'location' is required"}), 400
+
+    client = WeatherClient()
+    try:
+        lat, lon, label = resolve_location(location)
+        grid = client.resolve_point(lat, lon)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except (requests.HTTPError, KeyError) as exc:
+        return jsonify({"error": f"NWS lookup failed: {exc}"}), 502
+
+    if grid.get("city") and grid.get("state"):
+        label = f"{grid['city']}, {grid['state']}"
+    periods = client.get_forecast_periods(grid["office"], grid["grid_x"], grid["grid_y"])
+    return jsonify({"location": label, "periods": periods})
 
 
 # ===========================================================================
