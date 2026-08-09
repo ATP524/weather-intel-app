@@ -90,13 +90,24 @@ def get_embedding_model():
 
 def ensure_weather_tables():
     """
-    Create the weather schema + document table if they don't exist yet.
+    Ensure the weather schema + document table exist.
 
-    NOTE: This creates only `weather_documents` (the raw layer /weather/sync
-    writes to). The two pgvector tables are created by the sql/ DDL scripts,
-    because CREATE EXTENSION / HNSW index DDL is better run once, deliberately,
-    by an operator than implicitly on every request. See sql/README.md.
+    If an operator already provisioned the schema (by running the sql/ DDL
+    scripts), the app's DB role usually does NOT own those objects — and
+    CREATE INDEX / ALTER require ownership, which is what raised
+    "must be owner of table weather_documents" on /weather/sync. So we first
+    check whether the table exists; if it does, we assume the operator manages
+    the schema and skip all DDL, doing DML only. The CREATE statements below run
+    only on a genuinely fresh database (e.g. local dev), where the app creates —
+    and therefore owns — the table.
     """
+    present = lakebase.run_query(
+        "SELECT to_regclass(%s) IS NOT NULL AS present",
+        (f"weather.{DOCUMENTS_TABLE}",),
+    )[0]["present"]
+    if present:
+        return
+
     lakebase.run_write("CREATE SCHEMA IF NOT EXISTS weather")
     lakebase.run_write(
         f"""
