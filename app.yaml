@@ -5,7 +5,7 @@ command:
 env:
   # --- Lakebase secret (base64 Postgres URL; decoded in lakebase.py) --------
   - name: LAKEBASE_SECRET_SCOPE
-    value: "database-day1"
+    value: "database-day2"
   - name: LAKEBASE_SECRET_KEY
     value: "lakebase-url"
 
