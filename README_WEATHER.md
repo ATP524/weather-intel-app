@@ -3,17 +3,21 @@
 A retrieval-augmented pipeline over free-text weather data:
 
 ```
-NWS API  ──POST /weather/sync──▶  weather_documents        (raw narrative text, Postgres)
-                                        │
-                    ingest_weather_embeddings.py  (chunk + embed, psycopg2)
-                                        ▼
-                    weather_embeddings  +  weather_chunk_embeddings   (pgvector, 384-dim)
-                                        │
-                                ──POST /weather/search──▶  ranked results (cosine `<=>`)
+                    POST /weather/sync  (harvest + embed in one call)
+NWS API ──harvest──▶ weather_documents ──chunk + embed inline (psycopg2)──▶
+                                            weather_embeddings + weather_chunk_embeddings
+                                            (pgvector, 384-dim)
+                                                      │
+                          POST /weather/search ──▶ ranked results (cosine `<=>`),
+                                                   your active city prioritized
 ```
 
-`POST /weather/search {"query": "flash flood risk this weekend"}` returns the
-most semantically relevant weather documents, ranked by vector similarity.
+`POST /weather/sync` harvests **and vectorizes** in a single call, so a city is
+searchable immediately (the near-real-time payoff of psycopg2 + Lakebase — no
+separate batch step). `POST /weather/search` then returns the most semantically
+relevant documents by cosine similarity, with the user's active city surfaced
+first. `notebooks/ingest_weather_embeddings.py` provides the same embedding as a
+standalone batch job for bulk reprocessing (the Part-2 deliverable).
 
 ---
 
@@ -58,9 +62,18 @@ require paid keys).
 **Interpreting search scores:** results are ranked by cosine similarity between
 the query embedding and the alert/forecast text — i.e. *how closely an ingested
 NWS document describes your query*, **not a probability the weather will occur**.
-The UI shows this as Strong/Moderate/Weak match badges (raw cosine in a tooltip)
-plus each result's active/effective time window, so "match" reads as "this is in
-the alerts/forecast for the next ~7 days," which is the app's real utility.
+The UI buckets the raw cosine into four labelled tiers — **Strong ≥0.50**,
+**Moderate 0.35–0.50**, **Weak 0.20–0.35**, **Faint <0.20** — as colored badges
+(exact cosine in a hover tooltip), alongside each result's active/effective time
+window. So "match" reads as "this is in the alerts/forecast for the next ~7
+days," which is the app's real utility.
+
+**Location-prioritized results:** when the user has an active city,
+`POST /weather/search` returns two groups — `primary` (that city's best matches,
+always shown first, even a weak one) and `elsewhere` (stronger matches in *other*
+synced cities). This answers "is this pattern a risk where I am, and where else
+is it happening?" — useful for travel. Matching keys on the city-name token of
+`location` (NWS stores "City, ST" while the geocoder uses "City, State").
 
 ---
 
@@ -91,8 +104,9 @@ narratives are split so retrieval can surface the exact matching passage.
 `vector_cosine_ops` / `<=>` conventions. The column width `vector(384)` must
 equal the model's output; swap both together (see `sql/README.md`).
 
-**Chunking:** `CHUNK_SIZE=800`, `CHUNK_OVERLAP=100` (sliding character window).
-Most forecast periods are short → a single chunk; combined alert
+**Chunking:** `CHUNK_SIZE=800`, `CHUNK_OVERLAP=100` (sliding character window),
+applied identically by the app's embed-on-sync path (`app.py`) and the batch
+notebook. Most forecast periods are short → a single chunk; combined alert
 `description`+`instruction` is where chunking matters. Overlap preserves context
 across boundaries.
 
@@ -104,61 +118,82 @@ disables the index.
 
 ## 3. Run the pipeline end-to-end
 
-### Step 0 — Create the tables (once)
-Run in the Lakebase SQL editor, in order:
+### Step 0 — Create the tables & grant access (once)
+Run the three DDL scripts in the Lakebase SQL editor, in order:
 `sql/01_setup_weather_documents.sql`, `sql/02_setup_weather_embeddings.sql`,
-`sql/03_setup_weather_chunk_embeddings.sql`. See `sql/README.md`.
+`sql/03_setup_weather_chunk_embeddings.sql` (see `sql/README.md`). Then grant the
+app's role DML on the `weather` schema so it can write **documents *and*
+embeddings** (embed-on-sync writes both):
+```sql
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA weather TO <app_role>;
+ALTER DEFAULT PRIVILEGES IN SCHEMA weather GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO <app_role>;
+```
 
-### Step 1 — Harvest (`POST /weather/sync`)
+### Step 1 — Harvest **and embed** (`POST /weather/sync`)
+A single call fetches, normalizes, upserts into `weather_documents`, **and
+vectorizes inline** (psycopg2 + `execute_values` + `%s::vector`) into both
+embedding tables — so the city is searchable immediately, with no separate batch
+step. Idempotent via `ON CONFLICT`, so re-syncing refreshes in place.
 ```bash
-curl -sX POST localhost:8000/weather/sync \
+curl -sX POST <app-url>/weather/sync \
   -H 'Content-Type: application/json' \
-  -d '{"locations": ["Chicago, IL", "Oklahoma City, OK"], "limit": 50}'
+  -d '{"locations": ["Chicago, IL", "Oklahoma City, OK"], "limit": 20}'
 ```
 Expected:
 ```json
-{"synced": 32, "locations": ["Chicago, IL", "Oklahoma City, OK"], "skipped": []}
+{"synced": 28, "embedded": 28, "chunks": 34,
+ "locations": ["Chicago, IL", "Oklahoma City, OK"], "skipped": []}
 ```
 
-### Step 2 — Embed (`notebooks/ingest_weather_embeddings.py`)
-Run the notebook in Databricks (it reuses the `database-day2/lakebase-url`
-secret). Its final cells print row counts and a retrieval smoke test. Expected:
-`doc_embeddings == documents`, `chunk_embeddings >= documents`.
-
-### Step 3 — Retrieve (`POST /weather/search`)
+### Step 2 — Retrieve (`POST /weather/search`)
+Pass `primary_city` to prioritize the user's active city; results split into
+that city vs. everywhere else. Each match includes its `effective_at`/`expires_at`.
 ```bash
-curl -sX POST localhost:8000/weather/search \
+curl -sX POST <app-url>/weather/search \
   -H 'Content-Type: application/json' \
-  -d '{"query": "excessive heat warning", "top_k": 5, "search_mode": "chunk"}'
+  -d '{"query": "tornado risk", "top_k": 5, "primary_city": "Milwaukee"}'
 ```
 Expected shape:
 ```json
 {
-  "query": "excessive heat warning",
-  "search_mode": "chunk",
-  "source_type": null,
-  "count": 5,
-  "results": [
-    {"location": "Oklahoma City, OK", "headline": "Heat Advisory",
-     "source_type": "alert", "chunk_text": "* WHAT...Heat index values up to 106...",
-     "chunk_index": 0, "similarity": 0.71}
-  ]
+  "query": "tornado risk", "search_mode": "chunk", "source_type": null,
+  "primary_city": "Milwaukee",
+  "primary":   [{"location": "Milwaukee, WI", "headline": "This Afternoon",
+                 "source_type": "forecast", "similarity": 0.19, "chunk_text": "..."}],
+  "elsewhere": [{"location": "Oklahoma City, OK", "headline": "Tornado Watch",
+                 "source_type": "alert", "similarity": 0.63, "chunk_text": "..."}],
+  "count": 2
 }
 ```
+Omit `primary_city` to get a single corpus-wide `results` list instead.
 
-**Search options:** `search_mode` = `chunk` (default, returns the matching
-passage) or `document` (whole-doc scores); `top_k` clamped 1–20; optional
-`source_type` = `alert` | `forecast`.
+**Search options:** `search_mode` = `chunk` (default; returns the matching
+passage) or `document` (whole-doc); `top_k` clamped 1–20; `source_type` =
+`alert` | `forecast`; `primary_city` anchors the prioritized split.
+
+### (Optional) Batch embedding — `notebooks/ingest_weather_embeddings.py`
+Embed-on-sync covers normal use. The notebook is the **Part-2 deliverable** and a
+bulk/backfill tool: it reads `weather_documents` via psycopg2 and re-embeds into
+the same tables (idempotent). Run it in Databricks only when you need to re-embed
+everything — e.g. after changing the model or a large one-off import.
 
 ---
 
-## 4. Local development
+## 4. Running the app (Databricks App)
 
-```bash
-cp .env.example .env      # fill in LAKEBASE_URL and WEATHER_USER_AGENT
-pip install -r requirements.txt
-python app.py             # serves on :8000
-```
+This runs as a **Databricks App** deployed from the repo — no local server
+needed. In the Databricks UI:
+
+1. Create/point an App at this repo; `app.yaml` provides the run command + env.
+2. Set env: `LAKEBASE_SECRET_SCOPE=database-day2`, `WEATHER_USER_AGENT` (a real
+   contact — NWS requires it), `EMBEDDING_MODEL`, and optionally `WEATHER_LOCATIONS`.
+3. Add the `lakebase-url` **secret as an App resource** — this grants the app's
+   service principal read access to it (see `setup_secrets.py`, which stores the
+   base64-encoded Lakebase URL in the `database-day2` scope). NWS needs no key.
+4. **Deploy** (and redeploy after any code change). The `/` route serves the UI.
+
+> Local dev is optional: `cp .env.example .env`, `pip install -r requirements.txt`,
+> `python app.py` (serves `:8000`) — but Databricks Apps is the deployment target.
 
 ---
 
@@ -168,9 +203,14 @@ python app.py             # serves on :8000
   (filtered to US, since NWS only covers the US). Non-US places won't resolve,
   and syncing an un-cached city adds one geocoding round-trip. The in-process
   cache is per-worker and not shared across app replicas.
-- **Full re-embed each run.** The notebook embeds every document each run
-  (idempotent via upsert). For scale, add a LEFT JOIN anti-filter against
-  `weather_embeddings` to embed only new rows.
+- **Synchronous embedding on sync.** `/weather/sync` embeds inline, so a large
+  multi-city sync blocks the request for the encode time (fine for ~20 docs/city;
+  the model loads on the first sync of a session). Embedding covers just the
+  freshly-synced docs, keyed by stable id; use the batch notebook for heavy
+  backfills.
+- **Prioritized search matches by city name.** The `primary`/`elsewhere` split
+  keys on the city-name token of `location` (NWS "City, ST" vs geocoder "City,
+  State"); a raw `"lat,lon"` pick falls back to a corpus-wide search.
 - **Alert volatility.** NWS alerts expire; a scheduled re-sync (Databricks Job)
   would keep the corpus current. `expires_at` is stored to support pruning.
 - **No LLM summary yet.** The stretch-goal RAG summary (`GET /weather/search`
@@ -185,8 +225,9 @@ python app.py             # serves on :8000
 
 | Deliverable | File |
 |-------------|------|
-| NWS API client | `weather_client.py` |
-| REST endpoints | `app.py` (`POST /weather/sync`, `POST /weather/search`) |
+| NWS API client (+ geocode, conditions, air quality) | `weather_client.py` |
+| REST endpoints | `app.py` — `POST /weather/sync`, `POST /weather/search`, `GET /weather/geocode`, `GET /weather/conditions` |
 | DDL / migrations | `sql/01`–`03`, `lakebase.py` (search_path) |
-| Embedding ingestion (psycopg2) | `notebooks/ingest_weather_embeddings.py` |
+| Embedding — psycopg2 | inline in `app.py` (`/weather/sync`, embed-on-sync) **and** batch `notebooks/ingest_weather_embeddings.py` |
+| UI | `templates/index.html` (type-ahead location, live conditions, prioritized search) |
 | This document | `README_WEATHER.md` |
