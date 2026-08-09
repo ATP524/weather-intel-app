@@ -1,0 +1,24 @@
+# Databricks Asset Bundle config for the Weather Intelligence app.
+# Deploy with: databricks bundle deploy -t dev   (or -t prod)
+#
+# This bundle currently only pins the workspace/target config. The Flask app
+# itself deploys as a Databricks App via app.yaml. To schedule the embedding
+# notebook (notebooks/ingest_weather_embeddings.py) as a Workflow, add a job
+# spec under a resources/ directory and re-include it here (see the "scheduled
+# re-sync" stretch goal in README_WEATHER.md).
+
+bundle:
+  name: databricks-lakebase-weather-app
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://<your-workspace>.cloud.databricks.com
+
+  prod:
+    mode: production
+    workspace:
+      host: https://<your-workspace>.cloud.databricks.com
+      root_path: /Shared/.bundle/${bundle.name}/${bundle.target}

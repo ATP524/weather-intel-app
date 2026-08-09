@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Weather Intelligence — Semantic Search</title>
+  <style>
+    /* Minimal, dependency-free styling. Single-file so it deploys with the
+       Databricks App without a bundler or CDN. */
+    :root {
+      --bg: #0f172a; --panel: #1e293b; --line: #334155;
+      --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8; --accent-ink: #0f172a;
+      --good: #34d399;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg); color: var(--text);
+    }
+    header { padding: 28px 20px 10px; max-width: 860px; margin: 0 auto; }
+    h1 { margin: 0 0 4px; font-size: 22px; }
+    .sub { color: var(--muted); margin: 0; }
+    main { max-width: 860px; margin: 0 auto; padding: 12px 20px 60px; }
+    section {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+      padding: 18px; margin-top: 18px;
+    }
+    h2 { margin: 0 0 12px; font-size: 15px; text-transform: uppercase;
+         letter-spacing: .04em; color: var(--muted); }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+    input, select, textarea {
+      width: 100%; padding: 9px 11px; background: #0b1220; color: var(--text);
+      border: 1px solid var(--line); border-radius: 8px; font: inherit;
+    }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .row > div { flex: 1; min-width: 160px; }
+    button {
+      margin-top: 14px; padding: 9px 16px; border: 0; border-radius: 8px;
+      background: var(--accent); color: var(--accent-ink); font-weight: 600;
+      cursor: pointer;
+    }
+    button:disabled { opacity: .55; cursor: default; }
+    .status { margin-top: 10px; font-size: 13px; color: var(--muted); min-height: 18px; }
+    .card {
+      border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+      margin-top: 10px; background: #0b1220;
+    }
+    .card .top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+    .loc { font-weight: 600; }
+    .sim { color: var(--good); font-variant-numeric: tabular-nums; font-size: 13px; }
+    .tag {
+      display: inline-block; font-size: 11px; text-transform: uppercase;
+      letter-spacing: .05em; padding: 1px 7px; border-radius: 999px;
+      border: 1px solid var(--line); color: var(--muted); margin-left: 8px;
+    }
+    .snippet { color: var(--text); margin-top: 6px; font-size: 14px; }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🌦️ Weather Intelligence</h1>
+    <p class="sub">Semantic search over NWS alerts &amp; forecasts, powered by Lakebase + pgvector.</p>
+  </header>
+
+  <main>
+    <!-- ── Harvest ─────────────────────────────────────────────────────── -->
+    <section>
+      <h2>1 · Harvest</h2>
+      <label for="locations">Locations (comma-separated: city names or "lat,lon")</label>
+      <input id="locations" value="Chicago, IL, Oklahoma City, OK"
+             placeholder='Chicago, IL, Austin, TX, 30.27,-97.74' />
+      <p class="hint">Cities must be in the curated map (see weather_client.py) or given as lat,lon.</p>
+      <div class="row">
+        <div>
+          <label for="limit">Max docs per location</label>
+          <input id="limit" type="number" value="50" min="1" max="500" />
+        </div>
+      </div>
+      <button id="syncBtn">Sync from NWS</button>
+      <div id="syncStatus" class="status"></div>
+    </section>
+
+    <!-- ── Retrieve ────────────────────────────────────────────────────── -->
+    <section>
+      <h2>2 · Search</h2>
+      <label for="query">Natural-language query</label>
+      <input id="query" value="flash flood risk this weekend"
+             placeholder="e.g. excessive heat warning" />
+      <div class="row">
+        <div>
+          <label for="mode">Search mode</label>
+          <select id="mode">
+            <option value="chunk">chunk (passage-level)</option>
+            <option value="document">document (whole-doc)</option>
+          </select>
+        </div>
+        <div>
+          <label for="source">Source filter</label>
+          <select id="source">
+            <option value="">any</option>
+            <option value="alert">alert</option>
+            <option value="forecast">forecast</option>
+          </select>
+        </div>
+        <div>
+          <label for="topk">Top K (1–20)</label>
+          <input id="topk" type="number" value="5" min="1" max="20" />
+        </div>
+      </div>
+      <button id="searchBtn">Search</button>
+      <div id="searchStatus" class="status"></div>
+      <div id="results"></div>
+    </section>
+  </main>
+
+  <script>
+    // Tiny helper: POST JSON and parse JSON, surfacing API errors uniformly.
+    async function postJSON(path, body) {
+      const resp = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      return data;
+    }
+
+    // Split the free-text locations box into entries. We keep two-part city
+    // names ("Chicago, IL") intact by re-joining pairs where the 2nd part looks
+    // like a US state code — otherwise treat each comma-separated token as-is.
+    function parseLocations(raw) {
+      const parts = raw.split(",").map(s => s.trim()).filter(Boolean);
+      const out = [];
+      for (let i = 0; i < parts.length; i++) {
+        const next = parts[i + 1];
+        if (next && /^[A-Za-z]{2}$/.test(next)) {         // "City", "ST"
+          out.push(`${parts[i]}, ${next}`); i++;
+        } else if (next && /^-?\d/.test(parts[i]) && /^-?\d/.test(next)) {
+          out.push(`${parts[i]},${next}`); i++;           // "lat", "lon"
+        } else {
+          out.push(parts[i]);
+        }
+      }
+      return out;
+    }
+
+    const $ = id => document.getElementById(id);
+
+    $("syncBtn").addEventListener("click", async () => {
+      const btn = $("syncBtn"), status = $("syncStatus");
+      btn.disabled = true; status.textContent = "Harvesting from api.weather.gov…";
+      try {
+        const data = await postJSON("/weather/sync", {
+          locations: parseLocations($("locations").value),
+          limit: Number($("limit").value),
+        });
+        let msg = `✅ Synced ${data.synced} documents for ${data.locations.join(", ")}.`;
+        if (data.skipped?.length) msg += ` Skipped: ${data.skipped.map(s => s.location).join(", ")}.`;
+        status.textContent = msg;
+      } catch (e) {
+        status.textContent = "⚠️ " + e.message;
+      } finally { btn.disabled = false; }
+    });
+
+    $("searchBtn").addEventListener("click", async () => {
+      const btn = $("searchBtn"), status = $("searchStatus"), results = $("results");
+      btn.disabled = true; status.textContent = "Embedding query & searching…"; results.innerHTML = "";
+      try {
+        const data = await postJSON("/weather/search", {
+          query: $("query").value,
+          top_k: Number($("topk").value),
+          search_mode: $("mode").value,
+          source_type: $("source").value || null,
+        });
+        status.textContent = `${data.count} result(s) for "${data.query}".`;
+        for (const r of data.results) {
+          const card = document.createElement("div");
+          card.className = "card";
+          const snippet = r.chunk_text || r.narrative_text || "";
+          card.innerHTML = `
+            <div class="top">
+              <span class="loc">${r.location ?? "—"} · ${r.headline ?? ""}
+                <span class="tag">${r.source_type ?? ""}</span></span>
+              <span class="sim">${(r.similarity ?? 0).toFixed(3)}</span>
+            </div>
+            <div class="snippet"></div>`;
+          // Assign snippet via textContent to avoid injecting raw API text as HTML.
+          card.querySelector(".snippet").textContent = snippet.slice(0, 400);
+          results.appendChild(card);
+        }
+        if (!data.results.length) results.innerHTML = '<p class="hint">No matches — has the embed step run?</p>';
+      } catch (e) {
+        status.textContent = "⚠️ " + e.message;
+      } finally { btn.disabled = false; }
+    });
+  </script>
+</body>
+</html>
