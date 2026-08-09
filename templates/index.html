@@ -111,7 +111,31 @@
     .legend .lead { font-size: 12px; color: var(--muted); margin-right: 2px; }
     .legend .pill { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid transparent; }
     .res-group { margin-top: 14px; }
-    .res-head { margin: 8px 0 2px; font-size: 13px; font-weight: 700; letter-spacing: .02em; color: var(--ink); }
+    .res-head { margin: 8px 0 2px; font-size: 13px; font-weight: 700; letter-spacing: .02em; color: var(--ink);
+                display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+    .res-head .sortnote { font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+    .legend .range { font-size: 11px; color: var(--muted); }
+    /* Custom tooltip — instant + styled to the app (replaces the sluggish native title). */
+    .tip { position: relative; }
+    .tip::after {
+      content: attr(data-tip); position: absolute; bottom: calc(100% + 7px); left: 50%;
+      transform: translateX(-50%); background: var(--ink); color: #F3F4EF; font-size: 11px;
+      font-weight: 500; font-style: normal; letter-spacing: .01em; white-space: nowrap;
+      padding: 5px 8px; border-radius: 6px; opacity: 0; pointer-events: none;
+      transition: opacity .12s ease; box-shadow: 0 8px 20px rgba(25,26,23,.25); z-index: 40;
+    }
+    .tip::before {
+      content: ""; position: absolute; bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%);
+      border: 5px solid transparent; border-top-color: var(--ink); opacity: 0;
+      transition: opacity .12s ease; pointer-events: none; z-index: 40;
+    }
+    .tip:hover::after, .tip:hover::before { opacity: 1; }
+    .cond-date { font-size: 10px; color: var(--muted); margin-top: 1px; font-variant-numeric: tabular-nums; }
+    .aqi-scale { margin-top: 8px; }
+    .aqi-scale-track { position: relative; height: 6px; border-radius: 999px; }
+    .aqi-marker { position: absolute; top: -3px; width: 3px; height: 12px; border-radius: 2px;
+                  background: var(--ink); transform: translateX(-50%); box-shadow: 0 0 0 2px var(--surface); }
+    .aqi-ends { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin-top: 3px; }
 
     footer { max-width: 1060px; margin: 0 auto; padding: 8px 20px 44px; color: var(--muted); font-size: 12px; }
   </style>
@@ -181,6 +205,7 @@
                   <option value="chunk">chunk (passage-level)</option>
                   <option value="document">document (whole-doc)</option>
                 </select>
+                <p class="hint">Chunk matches the exact passage — sharper for pinpointing. Document matches the whole item — better for overall relevance.</p>
               </div>
               <div>
                 <label for="source">Source filter</label>
@@ -189,10 +214,12 @@
                   <option value="alert">alert</option>
                   <option value="forecast">forecast</option>
                 </select>
+                <p class="hint">Narrow to official warnings (alert) or the routine outlook (forecast). Leave “any” to search both.</p>
               </div>
               <div>
                 <label for="topk">Top K (1–20)</label>
                 <input id="topk" type="number" value="5" min="1" max="20" />
+                <p class="hint">How many results to return per section — a higher K surfaces weaker matches too.</p>
               </div>
             </div>
           </details>
@@ -221,6 +248,8 @@
   <script>
     const $ = id => document.getElementById(id);
     const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+    // "2026-08-08" -> "Aug 8" (parse at local midnight so the date doesn't shift).
+    const fmtDate = (iso) => { try { return new Date(iso + "T00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch { return ""; } };
 
     async function postJSON(path, body) {
       const resp = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -279,13 +308,14 @@
           const c = document.createElement("div"); c.className = "cond-card";
           const em = document.createElement("div"); em.className = "cond-emoji"; em.textContent = d.emoji || "🌡️";
           const lb = document.createElement("div"); lb.className = "cond-label"; lb.textContent = d.label || "";
+          const dt = document.createElement("div"); dt.className = "cond-date"; dt.textContent = fmtDate(d.date);
           const tp = document.createElement("div"); tp.className = "cond-temp";
           const hi = d.temp_max != null ? Math.round(d.temp_max) + "°" : "—";
           const lo = d.temp_min != null ? Math.round(d.temp_min) + "°" : "—";
           tp.textContent = `${hi} / ${lo}`;
           const ds = document.createElement("div"); ds.className = "cond-desc"; ds.textContent = d.description || "";
           const pp = document.createElement("div"); pp.className = "cond-precip"; pp.textContent = d.precip_prob != null ? `💧 ${d.precip_prob}%` : "";
-          c.append(em, lb, tp, ds, pp); days.append(c);
+          c.append(em, lb, dt, tp, ds, pp); days.append(c);
         }
         body.append(days);
         const aq = data.air_quality || {};
@@ -295,9 +325,25 @@
         const dot = document.createElement("span"); dot.className = "aqi-dot"; dot.style.background = aq.dot || "var(--muted)";
         const txt = document.createElement("span");
         txt.textContent = aq.us_aqi != null ? `Air quality ${aq.us_aqi} · ${aq.category}` : "Air quality: n/a";
-        // Tooltip carries the underlying pollutant readings (like the match tooltip).
-        if (aq.pm2_5 != null) badge.title = `PM2.5 ${aq.pm2_5} · PM10 ${aq.pm10} · Ozone ${aq.ozone} µg/m³`;
+        // Styled, instant tooltip carrying the underlying pollutant readings.
+        if (aq.pm2_5 != null) { badge.classList.add("tip"); badge.setAttribute("data-tip", `PM2.5 ${aq.pm2_5} · PM10 ${aq.pm10} · Ozone ${aq.ozone} µg/m³`); }
         badge.append(dot, txt); body.append(badge);
+
+        // Subtle 0–500 EPA scale with a marker showing where this AQI sits.
+        if (aq.us_aqi != null) {
+          const scale = document.createElement("div"); scale.className = "aqi-scale";
+          const track = document.createElement("div"); track.className = "aqi-scale-track";
+          track.style.background = "linear-gradient(to right,#6BA173 0% 10%,#C39A2E 10% 20%,#C77A4A 20% 30%,#C56A62 30% 40%,#9A7CC0 40% 60%,#A85450 60% 100%)";
+          const marker = document.createElement("div"); marker.className = "aqi-marker tip";
+          marker.style.left = Math.max(0, Math.min(100, (aq.us_aqi / 500) * 100)) + "%";
+          marker.setAttribute("data-tip", `AQI ${aq.us_aqi} of 500`);
+          track.append(marker); scale.append(track);
+          const ends = document.createElement("div"); ends.className = "aqi-ends";
+          const e0 = document.createElement("span"); e0.textContent = "0 · Good";
+          const e5 = document.createElement("span"); e5.textContent = "500 · Hazardous";
+          ends.append(e0, e5); scale.append(ends);
+          body.append(scale);
+        }
       } catch (e) { body.innerHTML = `<p class="hint">⚠️ ${e.message}</p>`; }
     }
 
@@ -340,21 +386,22 @@
     // stone) that fit the palette and echo the AQI scale. One source of truth
     // drives both the per-result badge and the legend under the search box.
     const MATCH_TIERS = [
-      { min: 0.5,       label: "Strong",   bg: "#E2EDE3", text: "#3F6E48", line: "#CFE0D0" },
-      { min: 0.35,      label: "Moderate", bg: "#F3EBD4", text: "#7C610F", line: "#E4D6AE" },
-      { min: 0.2,       label: "Weak",     bg: "#F1E4DA", text: "#8C4F2E", line: "#E1CBB9" },
-      { min: -Infinity, label: "Faint",    bg: "#E9EAE4", text: "#5B5E56", line: "#D8D9D1" },
+      { min: 0.5,       label: "Strong",   range: "≥ 0.50",    bg: "#E2EDE3", text: "#3F6E48", line: "#CFE0D0" },
+      { min: 0.35,      label: "Moderate", range: "0.35–0.50", bg: "#F3EBD4", text: "#7C610F", line: "#E4D6AE" },
+      { min: 0.2,       label: "Weak",     range: "0.20–0.35", bg: "#F1E4DA", text: "#8C4F2E", line: "#E1CBB9" },
+      { min: -Infinity, label: "Faint",    range: "< 0.20",    bg: "#E9EAE4", text: "#5B5E56", line: "#D8D9D1" },
     ];
     const matchTier = (sim) => MATCH_TIERS.find(t => sim >= t.min);
 
     function renderLegend() {
       const el = $("matchLegend"); el.innerHTML = "";
-      const lead = document.createElement("span"); lead.className = "lead"; lead.textContent = "Match strength:";
+      const lead = document.createElement("span"); lead.className = "lead"; lead.textContent = "Match strength (cosine):";
       el.append(lead);
       for (const t of MATCH_TIERS) {
         const p = document.createElement("span"); p.className = "pill";
         p.textContent = t.label; p.style.background = t.bg; p.style.color = t.text; p.style.borderColor = t.line;
-        el.append(p);
+        const r = document.createElement("span"); r.className = "range"; r.textContent = t.range;
+        el.append(p, r);
       }
     }
     renderLegend();
@@ -369,16 +416,21 @@
       const sim = r.similarity ?? 0;
       const t = matchTier(sim);
       const card = document.createElement("div"); card.className = "card";
-      card.innerHTML = `<div class="top"><span class="loc"></span><span class="badge" title="cosine ${sim.toFixed(3)}"></span></div><div class="when"></div><div class="snippet"></div>`;
+      card.innerHTML = `<div class="top"><span class="loc"></span><span class="badge tip"></span></div><div class="when"></div><div class="snippet"></div>`;
       card.querySelector(".loc").textContent = `${r.location ?? "—"} · ${r.headline ?? ""} ${r.source_type ? "(" + r.source_type + ")" : ""}`;
-      const b = card.querySelector(".badge"); b.textContent = `${t.label} match`; b.style.background = t.bg; b.style.color = t.text; b.style.borderColor = t.line;
+      const b = card.querySelector(".badge");
+      b.textContent = `${t.label} match`; b.style.background = t.bg; b.style.color = t.text; b.style.borderColor = t.line;
+      b.setAttribute("data-tip", `cosine similarity ${sim.toFixed(3)}`);
       card.querySelector(".when").textContent = fmtWhen(r);
       card.querySelector(".snippet").textContent = (r.chunk_text || r.narrative_text || "").slice(0, 400);
       return card;
     }
     function makeGroup(title, subtitle) {
       const g = document.createElement("div"); g.className = "res-group";
-      const h = document.createElement("h3"); h.className = "res-head"; h.textContent = title; g.append(h);
+      const h = document.createElement("h3"); h.className = "res-head";
+      const tt = document.createElement("span"); tt.textContent = title;
+      const sn = document.createElement("span"); sn.className = "sortnote"; sn.textContent = "↓ sorted by match strength";
+      h.append(tt, sn); g.append(h);
       if (subtitle) { const s = document.createElement("p"); s.className = "hint"; s.textContent = subtitle; g.append(s); }
       return g;
     }
@@ -419,8 +471,13 @@
           // Corpus-wide fallback (no active city picked).
           status.textContent = `${data.count} result(s) for "${data.query}".`;
           caption.hidden = data.count === 0; legend.hidden = data.count === 0;
-          if (data.results.length) data.results.forEach(r => results.append(makeCard(r)));
-          else results.innerHTML = '<p class="hint">No matches — search a city above and sync it first.</p>';
+          if (data.results.length) {
+            const g = makeGroup("Results");
+            data.results.forEach(r => g.append(makeCard(r)));
+            results.append(g);
+          } else {
+            results.innerHTML = '<p class="hint">No matches — search a city above and sync it first.</p>';
+          }
         }
       } catch (e) { status.textContent = "⚠️ " + e.message; } finally { btn.disabled = false; }
     });
