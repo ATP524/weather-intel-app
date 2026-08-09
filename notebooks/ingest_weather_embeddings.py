@@ -28,13 +28,9 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Install dependencies
+# DBTITLE 1,Install required packages
 # MAGIC %pip uninstall -y psycopg2 psycopg2-binary
-# MAGIC %pip install -q 'databricks-sdk>=0.30.0' psycopg2-binary sentence-transformers
-
-# COMMAND ----------
-
-dbutils.library.restartPython()
+# MAGIC %pip install -q 'databricks-sdk>=0.118.0' sentence-transformers trafilatura requests pandas
 
 # COMMAND ----------
 
@@ -42,6 +38,11 @@ dbutils.library.restartPython()
 # MAGIC ## Config
 # MAGIC Widgets let a scheduled Job override table names / model / chunk sizes
 # MAGIC without editing the notebook.
+
+# COMMAND ----------
+
+# DBTITLE 1,Restart Python kernel to clear psycopg2 conflict
+dbutils.library.restartPython()
 
 # COMMAND ----------
 
