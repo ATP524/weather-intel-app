@@ -101,7 +101,7 @@ Expected:
 ```
 
 ### Step 2 — Embed (`notebooks/ingest_weather_embeddings.py`)
-Run the notebook in Databricks (it reuses the `database-day1/lakebase-url`
+Run the notebook in Databricks (it reuses the `database-day2/lakebase-url`
 secret). Its final cells print row counts and a retrieval smoke test. Expected:
 `doc_embeddings == documents`, `chunk_embeddings >= documents`.
 

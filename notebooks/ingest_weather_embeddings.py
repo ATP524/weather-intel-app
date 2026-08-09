@@ -23,7 +23,7 @@
 # MAGIC vectors are correct on insert and re-runs are idempotent. There is no
 # MAGIC "cast arrays to vectors" cleanup step.
 # MAGIC
-# MAGIC Re-uses the SAME Lakebase secret (`database-day1` / `lakebase-url`) that
+# MAGIC Re-uses the SAME Lakebase secret (`database-day2` / `lakebase-url`) that
 # MAGIC `lakebase.py` uses — no extra secrets needed.
 
 # COMMAND ----------
@@ -49,7 +49,7 @@ dbutils.widgets.text("documents_table", "weather_documents", "Source table (raw 
 dbutils.widgets.text("embeddings_table", "weather_embeddings", "Dest table (doc vectors)")
 dbutils.widgets.text("chunk_embeddings_table", "weather_chunk_embeddings", "Dest table (chunk vectors)")
 dbutils.widgets.text("embedding_model", "sentence-transformers/all-MiniLM-L6-v2", "Embedding model")
-dbutils.widgets.text("lakebase_secret_scope", "database-day1", "Lakebase secret scope")
+dbutils.widgets.text("lakebase_secret_scope", "database-day2", "Lakebase secret scope")
 dbutils.widgets.text("lakebase_secret_key", "lakebase-url", "Lakebase secret key")
 dbutils.widgets.text("chunk_size", "800", "Chunk size (chars)")
 dbutils.widgets.text("chunk_overlap", "100", "Chunk overlap (chars)")
